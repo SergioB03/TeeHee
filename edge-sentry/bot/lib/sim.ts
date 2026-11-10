@@ -71,7 +71,27 @@ export type SimWorld = {
   cover: number[];
 };
 
+/** One line of the decision log: an order, spawn or reset and the picture it was made on. */
+export type SimDecision = {
+  at: string;
+  tick: number;
+  actor: string;
+  command: string;
+  args: Record<string, string>;
+  reason: string;
+  ok: boolean;
+  error: string;
+  picture: Array<{
+    id: string;
+    label: string;
+    score: number;
+    scorer: string;
+    inputs: Record<string, number>;
+  }>;
+};
+
 export type SimResult = {
+  decisions?: SimDecision[];
   ok: boolean;
   command?: string;
   error?: string;
@@ -105,7 +125,8 @@ export async function runSim(
   try {
     ({ stdout, stderr } = await execFileAsync(
       simBinary,
-      ["--world", world, ...args],
+      // Everything issued through the agent's tools is logged as actor "agent".
+      ["--world", world, "--actor", "agent", ...args],
       { maxBuffer: 2 * 1024 * 1024 },
     ));
   } catch (err) {
@@ -130,12 +151,14 @@ export async function runSim(
       command?: string;
       error?: string;
       world?: SimWorld;
+      decisions?: SimDecision[];
     };
     return {
       ok: Boolean(parsed.ok),
       command: parsed.command,
       error: parsed.error,
       world: parsed.world,
+      decisions: parsed.decisions,
       raw,
     };
   } catch {

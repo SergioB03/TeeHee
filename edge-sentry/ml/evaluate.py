@@ -5,7 +5,7 @@
     python3 ml/evaluate.py --check    # also exit non-zero if a floor is missed (CI)
 
 Standard library only. Three scorers are compared on identical simulator output:
-    learned     logistic regression on observable features (the default scorer)
+    learned     small neural network on observable features and track history (the default scorer)
     heuristic   hand-set weights that also read the contact's real target
     v1          the original hand-set weights, observable features only
 """
@@ -24,7 +24,7 @@ args = p.parse_args()
 
 model = json.load(open(os.path.join(simlab.HERE, "model.json")))
 SCORERS = [
-    ("learned", "Learned model (observable inputs only)"),
+    ("learned", "Learned model (observable inputs and track history)"),
     ("heuristic", "Heuristic that reads the contact's target"),
     ("v1", "Original heuristic (observable inputs only)"),
 ]
@@ -55,7 +55,7 @@ rows = simlab.dataset(range(100000, 100000 + args.rollouts))
 labels = [r["harm"] for r in rows]
 air = [r for r in rows if r["observed"][simlab.IX["airborne"]] > 0.5]
 air_labels = [r["harm"] for r in air]
-parity = max(abs(simlab.predict(model["weights"], model["bias"], r["observed"]) - r["learned"]) for r in rows)
+parity = max(abs(simlab.predict(model, r["observed"]) - r["learned"]) for r in rows)
 
 metrics = {}
 for key, _ in SCORERS:
@@ -148,7 +148,8 @@ with open(os.path.join(simlab.HERE, "RESULTS.md"), "w") as f:
 if args.check:
     floors = [
         ("C++/Python parity under 1e-4", parity < 1e-4),
-        ("learned AUC at least 0.93", metrics["learned"]["auc"] >= 0.93),
+        ("learned AUC at least 0.95", metrics["learned"]["auc"] >= 0.95),
+        ("learned AUC on air contacts at least 0.93", metrics["learned"]["auc_air"] >= 0.93),
         ("learned beats the observable-only heuristic by 0.10 AUC", metrics["learned"]["auc"] >= metrics["v1"]["auc"] + 0.10),
         ("learned passes at least 12 scripted scenarios", passed["learned"] >= 12),
     ]

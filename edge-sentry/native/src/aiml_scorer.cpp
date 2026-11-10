@@ -25,12 +25,13 @@ std::vector<double> heuristicInputs(const TrackFeatures& f) {
   };
 }
 
-std::vector<double> observedInputs(const ObservedFeatures& o) {
-  return {
-      clamp01(o.speed),   clamp01(o.snr),         clamp01(o.emitter), clamp01(o.proximity),
-      clamp01(o.airborne), clamp01(o.closing),     clamp01(o.heading), clamp01(o.aimRange),
-      clamp01(o.blueInField), clamp01(o.ewCover),  clamp01(o.recentFire), clamp01(o.intercept),
-  };
+// The heuristic keeps its fixed 0.33 / 0.66 cut-offs. The learned model's
+// cut-offs are operating points chosen on validation rollouts by ml/train.py.
+double watchThreshold(ScorerKind kind) {
+  return kind == ScorerKind::Learned ? edge_model::kWatchAt : 0.33;
+}
+double hostileThreshold(ScorerKind kind) {
+  return kind == ScorerKind::Learned ? edge_model::kHostileAt : 0.66;
 }
 }  // namespace
 
@@ -46,26 +47,21 @@ double heuristicScore(const TrackFeatures& f) {
   return clamp01(logit);
 }
 
-// Logistic regression: P(contact harms a blue asset within the label horizon).
-// Input order must match ml/simlab.py MODEL_INPUTS; ml/evaluate.py checks that
-// this function and the Python reference agree on every held-out row.
-double learnedScore(const ObservedFeatures& o) {
-  const std::vector<double> x = observedInputs(o);
-  double z = edge_model::kBias;
-  for (int i = 0; i < edge_model::kNumObserved; ++i) z += edge_model::kWeights[i] * x[static_cast<size_t>(i)];
-  // Interaction terms: motion toward blue matters more when already close.
-  z += edge_model::kWeights[edge_model::kNumObserved] * (x[5] * x[3]);      // closing * proximity
-  z += edge_model::kWeights[edge_model::kNumObserved + 1] * (x[6] * x[7]);  // heading * aimRange
+// One hidden layer of tanh units, sigmoid output:
+// P(contact harms a blue asset within the label horizon).
+// ml/evaluate.py checks that this function and the Python reference agree on
+// every held-out row.
+double learnedScore(const std::vector<double>& inputs) {
+  double z = edge_model::kOutBias;
+  for (int h = 0; h < edge_model::kHidden; ++h) {
+    double a = edge_model::kHiddenBias[h];
+    for (int i = 0; i < edge_model::kNumInputs; ++i) {
+      const double x = static_cast<size_t>(i) < inputs.size() ? clamp01(inputs[static_cast<size_t>(i)]) : 0.0;
+      a += edge_model::kHiddenWeights[h][i] * x;
+    }
+    z += edge_model::kOutWeights[h] * std::tanh(a);
+  }
   return 1.0 / (1.0 + std::exp(-z));
-}
-
-// The heuristic keeps its fixed 0.33 / 0.66 cut-offs. The learned model's
-// cut-offs are operating points chosen on validation rollouts by ml/train.py.
-static double watchThreshold(ScorerKind kind) {
-  return kind == ScorerKind::Learned ? edge_model::kWatchAt : 0.33;
-}
-static double hostileThreshold(ScorerKind kind) {
-  return kind == ScorerKind::Learned ? edge_model::kHostileAt : 0.66;
 }
 
 std::string labelForScore(double score, ScorerKind kind) {
@@ -74,17 +70,18 @@ std::string labelForScore(double score, ScorerKind kind) {
   return "benign";
 }
 
-ThreatScore scoreTrack(const TrackFeatures& f, const ObservedFeatures& o, ScorerKind kind) {
+ThreatScore scoreTrack(const TrackFeatures& f, const std::vector<double>& inputs, ScorerKind kind) {
   ThreatScore out;
   out.heuristicScore = heuristicScore(f);
-  out.learnedScore = learnedScore(o);
+  out.learnedScore = learnedScore(inputs);
   out.scorer = (kind == ScorerKind::Learned) ? "learned" : "heuristic";
   out.score = (kind == ScorerKind::Learned) ? out.learnedScore : out.heuristicScore;
   out.label = labelForScore(out.score, kind);
   out.watchAt = watchThreshold(kind);
   out.hostileAt = hostileThreshold(kind);
   out.features = heuristicInputs(f);
-  out.observed = observedInputs(o);
+  out.observed.reserve(inputs.size());
+  for (double v : inputs) out.observed.push_back(clamp01(v));
   return out;
 }
 
