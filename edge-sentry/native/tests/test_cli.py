@@ -198,6 +198,39 @@ sim("order", "--id", "B-HQ", "--action", "cease", "--reason", 'line one\nwith "q
 check("the log stays valid JSON with quotes and newlines in a reason", decisions(1)[0]["reason"].startswith("line one"))
 rejected("bad --actor is rejected", "--actor", "not a name!", "status", contains="--actor")
 
+# --- play mode: skirmish scenario and the computer opponent -------------------
+code, out = sim("reset", "--scenario", "skirmish")
+w = out["world"]
+check("skirmish scenario starts with 4 blue and 5 red units and no orders",
+      sum(u["team"] == "blue" for u in w["units"]) == 4 and sum(u["team"] == "red" for u in w["units"]) == 5
+      and all(u["order"]["action"] == "none" for u in w["units"]))
+rejected("unknown scenario is rejected", "reset", "--scenario", "nope", contains="scenario")
+rejected("opponent needs a side", "opponent", contains="--side")
+rejected("opponent rejects a bad side", "opponent", "--side", "green", contains="--side")
+before = len(decisions(500))
+code, out = sim("opponent", "--side", "red")
+orders = {o["id"]: o for o in out["orders"]}
+check("red opponent sends both missiles at HQ and each jet at a blue unit",
+      orders["R-MSL1"]["target"] == "B-HQ" and orders["R-MSL2"]["target"] == "B-HQ"
+      and orders["R-JET1"]["action"] == "launch" and orders["R-JET2"]["action"] == "launch"
+      and all(o["ok"] for o in out["orders"]))
+check("red opponent never orders blue units", all(i.startswith("R-") for i in orders))
+log = decisions(500)
+check("each opponent order is logged with actor 'opponent' and a reason",
+      len(log) == before + len(out["orders"]) and all(d["actor"] == "opponent" and d["reason"] for d in log[before:]))
+blocked = hits = 0
+for _ in range(12):
+    code, out = sim("opponent", "--side", "blue", "--no-log")
+    check_orders = out["orders"]
+    code, out = sim("tick")
+    for e in out["world"]["events"]:
+        if e["tick"] == out["world"]["tick"]:
+            blocked += e["kind"] == "blocked"
+            hits += e["kind"] == "engage" and "B-HQ" in e["detail"]
+check("blue opponent only ever orders its own HQ", all(o["id"] == "B-HQ" for o in check_orders))
+check("blue's model blocks at least one strike on HQ in the skirmish", blocked >= 1)
+sim("reset")
+
 print()
 if failures:
     print("%d check(s) FAILED" % len(failures))

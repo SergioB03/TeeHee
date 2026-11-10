@@ -124,6 +124,146 @@ World World::defaultScenario() {
 
 ScorerKind World::activeScorer = ScorerKind::Learned;
 
+World World::skirmishScenario() {
+  World w = defaultScenario();
+  w.units.clear();
+  w.events.clear();
+  auto add = [&](const std::string& id, UnitType type, Team team, int x, int y) {
+    Unit u;
+    u.id = id;
+    u.type = type;
+    u.team = team;
+    u.x = x;
+    u.y = y;
+    u.px = x;
+    u.py = y;
+    if (type == UnitType::Jammer) u.jamRadius = 3;
+    w.units.push_back(u);
+  };
+  add("B-HQ", UnitType::HQ, Team::Blue, 1, 1);
+  add("B-S1", UnitType::Sensor, Team::Blue, 2, 3);
+  add("B-S2", UnitType::Sensor, Team::Blue, 3, 8);
+  add("B-R1", UnitType::Relay, Team::Blue, 4, 5);
+  add("R-J1", UnitType::Jammer, Team::Red, 9, 8);
+  add("R-JET1", UnitType::Jet, Team::Red, 10, 2);
+  add("R-JET2", UnitType::Jet, Team::Red, 11, 10);
+  add("R-MSL1", UnitType::Missile, Team::Red, 8, 3);
+  add("R-MSL2", UnitType::Missile, Team::Red, 11, 6);
+  w.events.push_back({0, "scenario", "skirmish loaded: nobody has orders yet"});
+  w.scoreAllTracks();
+  return w;
+}
+
+// The computer opponent. Blue is run by the learned threat model: its one
+// defensive slot goes to the contact with the highest score x severity.
+// Red follows a short fixed doctrine. Both only issue orders a player could.
+std::vector<OpponentMove> World::planOpponent(Team side) const {
+  std::vector<OpponentMove> moves;
+  auto nearestBlue = [&](const Unit& from, bool sensorsFirst) -> const Unit* {
+    const Unit* best = nullptr;
+    double bestD = 1e9;
+    for (int pass = 0; pass < 2 && !best; ++pass) {
+      for (const auto& b : units) {
+        if (!b.alive || b.team != Team::Blue) continue;
+        const bool isHq = b.type == UnitType::HQ;
+        if (sensorsFirst && pass == 0 && isHq) continue;
+        const double d = dist(b.x, b.y, from.x, from.y);
+        if (d < bestD) {
+          bestD = d;
+          best = &b;
+        }
+      }
+    }
+    return best;
+  };
+
+  if (side == Team::Blue) {
+    const Unit* hq = nullptr;
+    for (const auto& u : units) {
+      if (u.alive && u.team == Team::Blue && u.type == UnitType::HQ) {
+        hq = &u;
+        break;
+      }
+    }
+    if (!hq) return moves;
+    const Track* best = nullptr;
+    double bestValue = 0;
+    for (const auto& t : tracks) {
+      const Unit* u = findUnit(t.sourceUnitId);
+      if (!u || !u->alive || t.threat.learnedScore < learnedWatchAt()) continue;
+      const double severity = u->type == UnitType::Missile ? 40 : u->type == UnitType::Jet ? 15 : u->type == UnitType::Jammer ? 3 : 0;
+      const double value = t.threat.learnedScore * severity;
+      if (value > bestValue) {
+        bestValue = value;
+        best = &t;
+      }
+    }
+    const bool defending = hq->order.action == OrderAction::Defend;
+    if (best && !(defending && hq->order.targetId == best->sourceUnitId)) {
+      std::ostringstream why;
+      why.precision(2);
+      why << best->sourceUnitId << " reads " << labelForScore(best->threat.learnedScore, ScorerKind::Learned) << " at "
+          << std::fixed << best->threat.learnedScore << ", the highest expected loss";
+      OpponentMove m;
+      m.id = hq->id;
+      m.action = OrderAction::Defend;
+      m.targetId = best->sourceUnitId;
+      m.reason = why.str();
+      moves.push_back(m);
+    } else if (!best && defending) {
+      OpponentMove m;
+      m.id = hq->id;
+      m.action = OrderAction::Cease;
+      m.reason = "no contact is above the watch line";
+      moves.push_back(m);
+    }
+    return moves;
+  }
+
+  for (const auto& u : units) {
+    if (!u.alive || u.team != Team::Red) continue;
+    if (u.type == UnitType::Missile || u.type == UnitType::Jet) {
+      const Unit* current = u.targetId.empty() ? nullptr : findUnit(u.targetId);
+      if (current && current->alive) continue;  // already committed
+      const Unit* tgt = nearestBlue(u, u.type == UnitType::Jet);
+      if (u.type == UnitType::Missile) {
+        // Missiles go for the command post while it stands.
+        for (const auto& b : units) {
+          if (b.alive && b.team == Team::Blue && b.type == UnitType::HQ) tgt = &b;
+        }
+      }
+      if (!tgt) continue;
+      OpponentMove m;
+      m.id = u.id;
+      m.action = OrderAction::Launch;
+      m.targetId = tgt->id;
+      m.reason = u.type == UnitType::Missile ? "strike the command post" : "suppress the nearest sensor";
+      moves.push_back(m);
+    } else if (u.type == UnitType::Jammer) {
+      bool covering = false;
+      for (const auto& b : units) {
+        if (!b.alive || b.team != Team::Blue) continue;
+        if (dist(b.x, b.y, u.x, u.y) < u.jamRadius) covering = true;
+      }
+      if (covering) continue;
+      const Unit* tgt = nearestBlue(u, true);
+      if (!tgt) continue;
+      // Stop one cell short of the asset, on the jammer's side of it.
+      const int tx = clampi(tgt->x + (u.x > tgt->x ? 1 : u.x < tgt->x ? -1 : 0), 0, width - 1);
+      const int ty = clampi(tgt->y + (u.y > tgt->y ? 1 : u.y < tgt->y ? -1 : 0), 0, height - 1);
+      if (u.order.action == OrderAction::Move && u.order.tx == tx && u.order.ty == ty) continue;
+      OpponentMove m;
+      m.id = u.id;
+      m.action = OrderAction::Move;
+      m.tx = tx;
+      m.ty = ty;
+      m.reason = "close in to jam " + tgt->id;
+      moves.push_back(m);
+    }
+  }
+  return moves;
+}
+
 void World::reset() { *this = defaultScenario(); }
 
 Unit* World::findUnit(const std::string& id) {

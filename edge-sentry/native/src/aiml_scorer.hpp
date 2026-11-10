@@ -77,6 +77,8 @@ double heuristicScore(const TrackFeatures& f);
 // `inputs` must follow modelInputNames(); values are clamped to 0..1.
 double learnedScore(const std::vector<double>& inputs);
 std::string labelForScore(double score, ScorerKind kind);
+// The learned model's "worth watching" cut-off, whatever scorer is active.
+double learnedWatchAt();
 
 ThreatScore scoreTrack(const TrackFeatures& f, const std::vector<double>& inputs, ScorerKind kind);
 

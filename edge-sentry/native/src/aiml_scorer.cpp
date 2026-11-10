@@ -64,6 +64,8 @@ double learnedScore(const std::vector<double>& inputs) {
   return 1.0 / (1.0 + std::exp(-z));
 }
 
+double learnedWatchAt() { return edge_model::kWatchAt; }
+
 std::string labelForScore(double score, ScorerKind kind) {
   if (score >= hostileThreshold(kind)) return "hostile";
   if (score >= watchThreshold(kind)) return "watch";

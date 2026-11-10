@@ -72,6 +72,13 @@ npm run web          # builds edge-sim if needed, serves http://localhost:3100
 
 Tap a unit, give it a move, jam, launch, cease or defend order with an optional reason, and advance ticks. The decision log at the bottom of the page shows each order with the threat picture at that moment. On Replit, import the repo and press Run; the root `.replit` file runs the same script.
 
+**Play a side.** Press *Play as blue* or *Play as red* for a 20-tick game against the computer:
+
+- As blue, red's missiles, jets and jammer come at you and you run the one point defense by hand.
+- As red, you attack and the trained threat model runs blue's defense, picking the contact with the highest threat score weighted by how much damage it can do.
+
+The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side, the opponent's orders go into the decision log as actor `opponent`, and each visitor gets a separate world, so two people on the hosted demo do not disturb each other.
+
 Agent playground:
 
 ```bash
@@ -84,7 +91,7 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 53 CLI regression checks
+npm test               # 62 CLI regression checks
 npm run eval:model     # held-out metrics, 14 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
 ```
@@ -100,14 +107,16 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds five scenarios, lets th
 - The decision log (`<world>.decisions.jsonl`) is append-only: every order, spawn and reset, accepted or refused, with who issued it, the stated reason, and the threat picture beforehand. Option values are parsed as plain text, so no reason or unit id can switch logging off.
 - The C++ model and the Python reference are checked against each other on every held-out row (they agree to within 1e-5).
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
+- The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
 - [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) records a code review of the first version: five bugs found, fixed, and covered by regression tests.
 
 ## Roadmap
 
-1. Line of sight and terrain masking, so cover affects detection
-2. Run the outcome-graded agent eval and compare the agent with the scripted triage policy
-3. More than one defensive resource, so triage becomes an assignment problem
-4. Raspberry Pi field node behind the same JSON CLI
+1. True 3D battlefield: altitude, climb and dive, named aircraft types, and a 3D view (needs the model retrained on the new inputs)
+2. Line of sight and terrain masking, so cover affects detection
+3. Run the outcome-graded agent eval and compare the agent with the scripted triage policy
+4. More than one defensive resource, so triage becomes an assignment problem
+5. Raspberry Pi field node behind the same JSON CLI
 
 ## Safety line
 
