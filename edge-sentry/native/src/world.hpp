@@ -35,6 +35,9 @@ struct Unit {
   double r0 = -1, r1 = -1, r2 = -1, r3 = -1;  // range to nearest blue asset; -1 = unknown
   int stopTicks = 0;                          // consecutive ticks without moving
   bool moved = false;                         // has it ever moved
+  // Sequence model memory: the GRU hidden state after the last tick it saw.
+  std::vector<double> seqHidden;
+  int seqTick = -1;                           // tick the hidden state was last advanced on; -1 = never
   Order order;
   bool alive = true;
 };

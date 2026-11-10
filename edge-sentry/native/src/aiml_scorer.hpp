@@ -9,6 +9,8 @@
 //   - learned (default): a small neural network trained on simulator rollouts
 //     (see ml/). Weights are generated into model_weights.hpp.
 //   - heuristic: hand-set weights over TrackFeatures (the original v1).
+//   - sequence (experimental): a GRU trained in PyTorch on raw per-tick
+//     observations, weights generated into sequence_weights.hpp.
 // `edge-sim --scorer heuristic` selects the baseline so the two can be
 // compared on identical worlds.
 
@@ -59,7 +61,17 @@ inline const std::vector<std::string>& modelInputNames() {
   return names;
 }
 
-enum class ScorerKind { Learned, Heuristic };
+enum class ScorerKind { Learned, Heuristic, Sequence };
+
+// The sequence model (experimental) is a GRU trained in PyTorch. It reads only
+// the first kSequenceInputs entries of modelInputNames(), the "this tick"
+// observations, and keeps its own memory of the track in a hidden state that
+// the simulator stores per contact. No hand-built history features.
+constexpr int kSequenceInputs = 17;
+int sequenceHiddenSize();
+// One GRU step: consumes this tick's inputs, updates `hidden` in place.
+void sequenceStep(const std::vector<double>& inputs, std::vector<double>& hidden);
+double sequenceScoreFromHidden(const std::vector<double>& hidden);
 
 struct ThreatScore {
   double score = 0;              // 0..1, from the active scorer
@@ -69,6 +81,7 @@ struct ThreatScore {
   double hostileAt = 0.66;
   double heuristicScore = 0;     // always computed, for comparison
   double learnedScore = 0;       // always computed, for comparison
+  double sequenceScore = 0;      // always computed, for comparison
   std::vector<double> features;  // heuristic inputs (6)
   std::vector<double> observed;  // learned-model inputs, see modelInputNames()
 };
@@ -80,7 +93,8 @@ std::string labelForScore(double score, ScorerKind kind);
 // The learned model's "worth watching" cut-off, whatever scorer is active.
 double learnedWatchAt();
 
-ThreatScore scoreTrack(const TrackFeatures& f, const std::vector<double>& inputs, ScorerKind kind);
+ThreatScore scoreTrack(const TrackFeatures& f, const std::vector<double>& inputs,
+                       const std::vector<double>& sequenceHidden, ScorerKind kind);
 
 // Softmax-style class probs for learning demos / eval dumps.
 struct ClassProbs {
