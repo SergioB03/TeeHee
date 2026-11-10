@@ -2,6 +2,8 @@
 
 A small air and electronic-warfare sandbox with a trained threat model, an LLM ops agent, and a phone console.
 
+**Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (best on a phone; the sandbox is shared, so press Reset scenario to start clean)
+
 ![Phone console: the model flags a missile hostile, the HQ's point defense is put on it, and the hit is blocked](docs/demo.gif)
 
 Blue sensors watch red contacts on a 12×12 map. The question the project answers each tick: **which contacts are about to hurt us, and which one do we deal with first?** A C++ simulator produces the world, a small neural network trained on simulator rollouts scores every contact, and an agent (or you, from your phone) reads the picture and issues orders. Every order is written to a decision log with the threat picture it was made on.
