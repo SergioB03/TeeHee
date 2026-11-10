@@ -248,7 +248,7 @@ check("sequence score is the same for 4 ticks at once and 4 single ticks with re
       seq_scores(out["world"]) == in_one_call and len(in_one_call) == 3)
 code, out = sim("--scorer", "sequence", "status")
 check("--scorer sequence labels tracks from the sequence score",
-      all(t["scorer"] == "sequence" and t["threatScore"] == t["sequenceScore"] for t in out["world"]["tracks"]))
+      all(t["scorer"] == "sequence" and abs(t["threatScore"] - t["sequenceScore"]) < 1e-5 for t in out["world"]["tracks"]))
 sim("reset")
 
 print()

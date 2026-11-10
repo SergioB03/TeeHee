@@ -10,6 +10,7 @@ on:
     paths:
       - edge-sentry/ml/train_seq.py
       - edge-sentry/ml/seqlab.py
+      - edge-sentry/ml/evaluate.py
       - .github/workflows/train-sequence.yml
 
 permissions:
