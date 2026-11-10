@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#E8ECE4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121A1C" media="(prefers-color-scheme: dark)">
+<title>edge-sentry console</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #E8ECE4;
+  --paper-raised: #F3F5F0;
+  --ink: #1B2830;
+  --ink-soft: #51606A;
+  --line: #B4BFB1;
+  --blue: #2B66A8;
+  --blue-wash: #D5E2F0;
+  --red: #BF3B2B;
+  --red-wash: #F1D9D3;
+  --amber: #B97A0C;
+  --amber-wash: #EFDDB4;
+  --label: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121A1C;
+    --paper-raised: #1A2427;
+    --ink: #E4EAE2;
+    --ink-soft: #9AA9A6;
+    --line: #33423F;
+    --blue: #74ABE6;
+    --blue-wash: #1D3247;
+    --red: #EF7461;
+    --red-wash: #45231D;
+    --amber: #E3B14B;
+    --amber-wash: #40330F;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 16px/1.45 var(--body);
+  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+}
+.shell { max-width: 520px; margin: 0 auto; padding: 0 14px; }
+
+.topbar {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top)) 0 10px;
+}
+.topbar h1 { font: 600 22px/1 var(--label); margin: 0; letter-spacing: 0.01em; }
+.topbar .tick { font: 500 16px/1 var(--label); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.topbar .spacer { flex: 1; }
+
+button, select {
+  font: 500 15px/1 var(--label);
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.quiet { background: transparent; }
+button.go { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* Map: a chart with a neatline, the one loud element on the page */
+.chart {
+  border: 1px solid var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+  margin: 4px 3px 0;
+  background: var(--paper-raised);
+}
+#map { display: block; width: 100%; height: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+#map text { font-family: var(--label); }
+.grid line { stroke: var(--line); stroke-width: 0.6; }
+.axis text { fill: var(--ink-soft); font-size: 10px; font-weight: 500; }
+.cover { fill: none; stroke: var(--ink-soft); stroke-width: 0.9; }
+.cell { fill: transparent; }
+.placing .cell { cursor: crosshair; }
+.placing .unit { pointer-events: none; }
+.jam { fill: var(--amber); fill-opacity: 0.16; stroke: var(--amber); stroke-width: 1; stroke-dasharray: 4 3; }
+.route { stroke: var(--ink-soft); stroke-width: 1; stroke-dasharray: 2 3; fill: none; }
+.aim { stroke: var(--red); stroke-width: 1; fill: none; }
+.cover-line { stroke: var(--blue); stroke-width: 1.4; stroke-dasharray: 5 3; fill: none; }
+.unit { cursor: pointer; transition: transform 320ms cubic-bezier(.3,.7,.2,1); }
+.unit .frame { stroke-width: 1.4; }
+.unit.blue .frame { fill: var(--blue-wash); stroke: var(--blue); }
+.unit.red .frame { fill: var(--red-wash); stroke: var(--red); }
+.unit text { font-size: 10.5px; font-weight: 600; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.unit.blue text { fill: var(--blue); }
+.unit.red text { fill: var(--red); }
+.unit .hp-track { fill: var(--line); }
+.unit.blue .hp { fill: var(--blue); }
+.unit.red .hp { fill: var(--red); }
+.unit .ring { fill: none; stroke: var(--ink); stroke-width: 1.6; opacity: 0; }
+.unit.selected .ring { opacity: 1; }
+.unit .strike { stroke: var(--ink-soft); stroke-width: 1.4; opacity: 0; }
+.unit.dead { opacity: 0.4; }
+.unit.dead .strike { opacity: 1; }
+.unit.dead .hp-track, .unit.dead .hp { opacity: 0; }
+
+.hint { display: flex; align-items: center; gap: 10px; min-height: 48px; margin: 10px 0 0; color: var(--ink-soft); font-size: 15px; }
+.hint span { flex: 1; }
+.hint.active { color: var(--ink); }
+
+.error { margin: 8px 0 0; padding: 10px 12px; border-left: 3px solid var(--red); background: var(--red-wash); font-size: 15px; }
+
+.selected { margin-top: 6px; padding: 12px 0 4px; border-top: 1px solid var(--ink); }
+.selected h2 { font: 600 20px/1.1 var(--label); margin: 0; }
+.selected .facts { margin: 4px 0 10px; color: var(--ink-soft); font-size: 15px; }
+.orders { display: flex; flex-wrap: wrap; gap: 8px; }
+.orders button { flex: 1 1 0; min-width: 72px; }
+
+section.block { margin-top: 22px; }
+section.block > h2 { font: 600 15px/1 var(--label); margin: 0 0 2px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+ul.rows, ol.rows { list-style: none; margin: 0; padding: 0; }
+.row {
+  display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 4px 10px;
+  width: 100%; min-height: 52px; padding: 8px 0; text-align: left;
+  background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  font: 400 15px/1.3 var(--body); color: var(--ink);
+}
+.row .id { font: 600 16px/1 var(--label); }
+.row.gone { color: var(--ink-soft); }
+.row[aria-pressed="true"] { background: var(--paper-raised); box-shadow: inset 3px 0 0 var(--ink); padding-left: 8px; }
+.meter { position: relative; height: 8px; background: var(--line); }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--ink-soft); }
+.meter.blue i { background: var(--blue); }
+.meter.watch i { background: var(--amber); }
+.meter.hostile i { background: var(--red); }
+.meter b { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--ink); opacity: 0.55; }
+.pair { display: grid; gap: 5px; }
+.pair small, .row small { color: var(--ink-soft); font-size: 13px; }
+.tag { font: 600 14px/1 var(--label); min-width: 54px; text-align: right; }
+.tag.watch { color: var(--amber); }
+.tag.hostile { color: var(--red); }
+.tag.benign { color: var(--ink-soft); }
+.log li { display: grid; grid-template-columns: 52px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.log .t { font: 500 15px/1.45 var(--label); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.empty { color: var(--ink-soft); padding: 10px 0; font-size: 15px; }
+.decisions li { padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.decisions .what { font: 600 16px/1.3 var(--label); }
+.decisions .refused { color: var(--red); }
+.decisions small { display: block; color: var(--ink-soft); font-size: 13px; line-height: 1.45; }
+.why { display: block; width: 100%; margin: 0 0 10px; padding: 0 12px; min-height: 44px; font: 400 15px/1 var(--body); color: var(--ink); background: var(--paper-raised); border: 1px solid var(--line); border-radius: 6px; }
+
+details { margin-top: 22px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
+.spawn { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-bottom: 14px; }
+.spawn button { grid-column: 1 / -1; }
+.key { margin: 12px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
+
+.clock {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: var(--paper); border-top: 1px solid var(--ink);
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+}
+.clock div { max-width: 520px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
+.clock button { min-height: 50px; font-size: 16px; }
+
+@media (prefers-reduced-motion: reduce) { .unit { transition: none; } button:active { transform: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <h1>edge-sentry</h1>
+    <span class="tick" id="tick">Tick 0</span>
+    <span class="spacer"></span>
+    <button class="quiet" id="reset" type="button">Reset scenario</button>
+  </header>
+
+  <div class="chart">
+    <svg id="map" role="group" aria-label="Sandbox map">
+      <g id="L-grid"></g>
+      <g id="L-jam"></g>
+      <g id="L-lines"></g>
+      <g id="L-cells"></g>
+      <g id="L-units"></g>
+    </svg>
+  </div>
+
+  <p class="hint" id="hint"><span id="hintText" aria-live="polite">Loading the sandbox.</span><button class="quiet" id="cancel" type="button" hidden>Cancel</button></p>
+  <p class="error" id="error" role="alert" hidden></p>
+
+  <section class="selected" id="selected" hidden>
+    <h2 id="selName"></h2>
+    <p class="facts" id="selFacts"></p>
+    <input class="why" id="why" type="text" maxlength="300" placeholder="Reason for the log (optional)" aria-label="Reason for this order">
+    <div class="orders" id="orders"></div>
+  </section>
+
+  <section class="block">
+    <h2>Red contacts</h2>
+    <ul class="rows" id="contacts"></ul>
+  </section>
+
+  <section class="block">
+    <h2>Blue force</h2>
+    <ul class="rows" id="blue"></ul>
+  </section>
+
+  <section class="block">
+    <h2>Event log</h2>
+    <ol class="rows log" id="log"></ol>
+  </section>
+
+  <section class="block">
+    <h2>Decision log</h2>
+    <ol class="rows decisions" id="decisions"></ol>
+  </section>
+
+  <details>
+    <summary>Add a unit</summary>
+    <div class="spawn">
+      <select id="spawnTeam" aria-label="Team">
+        <option value="red">Red</option>
+        <option value="blue">Blue</option>
+      </select>
+      <select id="spawnType" aria-label="Unit type">
+        <option value="jet">Jet</option>
+        <option value="missile">Missile</option>
+        <option value="jammer">Jammer</option>
+        <option value="sensor">Sensor</option>
+        <option value="relay">Relay</option>
+        <option value="hq">HQ</option>
+      </select>
+      <button id="spawnGo" type="button">Choose a square on the map</button>
+    </div>
+  </details>
+
+  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer, JT jet, MS missile. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
+</div>
+
+<div class="clock"><div>
+  <button class="go" id="tick1" type="button">Advance 1 tick</button>
+  <button id="tick5" type="button">Advance 5</button>
+</div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const CELL = 30, LEFT = 20, TOP = 3, BOTTOM = 18;
+const ABBR = { hq: "HQ", sensor: "SN", relay: "RL", jammer: "JM", jet: "JT", missile: "MS" };
+const KIND = { hq: "headquarters", sensor: "sensor", relay: "relay", jammer: "jammer", jet: "jet", missile: "missile" };
+
+let world = null;
+let selectedId = null;
+let mode = null; // null | "move" | "launch" | "defend" | "spawn"
+let decisions = [];
+let gridKey = "";
+const unitEls = new Map();
+
+const svg = (name, attrs = {}, parent) => {
+  const el = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (parent) parent.appendChild(el);
+  return el;
+};
+const html = (name, props = {}, parent) => {
+  const el = Object.assign(document.createElement(name), props);
+  if (parent) parent.appendChild(el);
+  return el;
+};
+const cx = (x) => LEFT + x * CELL + CELL / 2;
+const cy = (y) => TOP + y * CELL + CELL / 2;
+const unitById = (id) => world?.units.find((u) => u.id === id);
+const pct = (v) => Math.max(0, Math.min(1, v)) * 100 + "%";
+
+function setBusy(on) {
+  for (const b of document.querySelectorAll("button")) b.disabled = on;
+}
+function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
+function clearError() { $("error").hidden = true; }
+
+async function api(path, body) {
+  setBusy(true);
+  try {
+    const res = await fetch(path, body === undefined ? {} : {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!data.ok || !data.world) {
+      showError(data.error ? "The simulator said no: " + data.error + "." : "The simulator rejected that.");
+      return false;
+    }
+    clearError();
+    world = data.world;
+    loadDecisions();
+    return true;
+  } catch {
+    showError("Can't reach the server. Check that it is running, then try again.");
+    return false;
+  } finally {
+    setBusy(false);
+    render();
+  }
+}
+
+function setMode(next) {
+  mode = next;
+  render();
+}
+
+function buildGrid() {
+  const W = world.width, H = world.height;
+  const key = W + "x" + H + ":" + world.cover.join("");
+  if (key === gridKey) return;
+  gridKey = key;
+  const map = $("map");
+  map.setAttribute("viewBox", `0 0 ${LEFT + W * CELL + 4} ${TOP + H * CELL + BOTTOM}`);
+  const grid = $("L-grid"), cells = $("L-cells");
+  grid.replaceChildren(); cells.replaceChildren();
+
+  const defs = svg("defs", {}, grid);
+  const hatch = svg("pattern", { id: "hatch", width: 5, height: 5, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+  svg("line", { x1: 0, y1: 0, x2: 0, y2: 5, stroke: "var(--ink-soft)", "stroke-width": 1.1 }, hatch);
+  const clip = svg("clipPath", { id: "mapclip" }, defs);
+  svg("rect", { x: LEFT, y: TOP, width: W * CELL, height: H * CELL }, clip);
+  $("L-jam").setAttribute("clip-path", "url(#mapclip)");
+
+  const lines = svg("g", { class: "grid" }, grid);
+  for (let i = 0; i <= W; i++) svg("line", { x1: LEFT + i * CELL, y1: TOP, x2: LEFT + i * CELL, y2: TOP + H * CELL }, lines);
+  for (let j = 0; j <= H; j++) svg("line", { x1: LEFT, y1: TOP + j * CELL, x2: LEFT + W * CELL, y2: TOP + j * CELL }, lines);
+
+  const axis = svg("g", { class: "axis" }, grid);
+  for (let i = 0; i < W; i++) svg("text", { x: cx(i), y: TOP + H * CELL + 12, "text-anchor": "middle" }, axis).textContent = i;
+  for (let j = 0; j < H; j++) svg("text", { x: LEFT - 6, y: cy(j), "text-anchor": "end", "dominant-baseline": "central" }, axis).textContent = j;
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (world.cover[y * W + x]) {
+        svg("rect", { x: LEFT + x * CELL + 3, y: TOP + y * CELL + 3, width: CELL - 6, height: CELL - 6, fill: "url(#hatch)", opacity: 0.55 }, grid);
+        svg("rect", { class: "cover", x: LEFT + x * CELL + 3, y: TOP + y * CELL + 3, width: CELL - 6, height: CELL - 6 }, grid);
+      }
+      const cell = svg("rect", { class: "cell", x: LEFT + x * CELL, y: TOP + y * CELL, width: CELL, height: CELL }, cells);
+      cell.addEventListener("click", () => onCell(x, y));
+    }
+  }
+}
+
+function makeUnit(u) {
+  const g = svg("g", { class: "unit " + u.team, role: "button", tabindex: 0 });
+  g.dataset.sig = u.team + ":" + u.type;
+  if (u.team === "blue") {
+    svg("rect", { class: "ring", x: -16, y: -13, width: 32, height: 26, rx: 4 }, g);
+    svg("rect", { class: "frame", x: -12, y: -9, width: 24, height: 18, rx: 2 }, g);
+  } else {
+    svg("polygon", { class: "ring", points: "0,-18 19,0 0,18 -19,0" }, g);
+    svg("polygon", { class: "frame", points: "0,-13 14,0 0,13 -14,0" }, g);
+  }
+  svg("text", { x: 0, y: 0.5 }, g).textContent = ABBR[u.type] ?? "?";
+  svg("rect", { class: "hp-track", x: -11, y: 12.5, width: 22, height: 2.5 }, g);
+  svg("rect", { class: "hp", x: -11, y: 12.5, width: 22, height: 2.5 }, g);
+  svg("line", { class: "strike", x1: -12, y1: 10, x2: 12, y2: -10 }, g);
+  const pick = () => onUnit(g.dataset.id);
+  g.addEventListener("click", pick);
+  g.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+  });
+  return g;
+}
+
+function renderMap() {
+  buildGrid();
+  $("map").classList.toggle("placing", mode === "move" || mode === "spawn");
+
+  const jam = $("L-jam"); jam.replaceChildren();
+  for (const u of world.units) {
+    if (u.alive && u.type === "jammer" && u.jamRadius > 0) {
+      svg("circle", { class: "jam", cx: cx(u.x), cy: cy(u.y), r: u.jamRadius * CELL }, jam);
+    }
+  }
+
+  const lines = $("L-lines"); lines.replaceChildren();
+  for (const u of world.units) {
+    if (!u.alive) continue;
+    if (u.order.action === "move" && u.order.tx >= 0 && u.order.ty >= 0) {
+      svg("line", { class: "route", x1: cx(u.x), y1: cy(u.y), x2: cx(u.order.tx), y2: cy(u.order.ty) }, lines);
+    }
+    const tgt = u.targetId ? unitById(u.targetId) : null;
+    if (tgt && tgt.alive) svg("line", { class: "aim", x1: cx(u.x), y1: cy(u.y), x2: cx(tgt.x), y2: cy(tgt.y) }, lines);
+    const covered = u.order.action === "defend" ? unitById(u.order.targetId) : null;
+    if (covered && covered.alive) svg("line", { class: "cover-line", x1: cx(u.x), y1: cy(u.y), x2: cx(covered.x), y2: cy(covered.y) }, lines);
+  }
+
+  const layer = $("L-units");
+  const seen = new Set();
+  const stack = new Map();
+  const ordered = [...world.units].sort((a, b) => Number(b.alive) - Number(a.alive));
+  for (const u of ordered) {
+    seen.add(u.id);
+    let el = unitEls.get(u.id);
+    if (el && el.dataset.sig !== u.team + ":" + u.type) { el.remove(); el = null; }
+    if (!el) { el = makeUnit(u); el.dataset.id = u.id; unitEls.set(u.id, el); }
+    const key = u.x + "," + u.y;
+    const i = stack.get(key) ?? 0;
+    stack.set(key, i + 1);
+    el.style.transform = `translate(${cx(u.x) + i * 7}px, ${cy(u.y) - i * 7}px)`;
+    el.classList.toggle("dead", !u.alive);
+    el.classList.toggle("selected", u.id === selectedId);
+    el.querySelector(".hp").setAttribute("width", (Math.max(0, Math.min(100, u.hp)) / 100) * 22);
+    el.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}${u.alive ? "" : ", destroyed"}`);
+    if (u.alive) layer.appendChild(el); else layer.insertBefore(el, layer.firstChild);
+  }
+  for (const [id, el] of unitEls) if (!seen.has(id)) { el.remove(); unitEls.delete(id); }
+}
+
+function renderHint() {
+  const sel = unitById(selectedId);
+  let text = "Tap a unit on the map or in the lists to give it an order.";
+  if (mode === "move" && sel) text = `Tap a square to send ${sel.id} there.`;
+  else if (mode === "launch" && sel) text = `Tap the unit ${sel.id} should attack.`;
+  else if (mode === "defend" && sel) text = `Tap the red contact ${sel.id} should defend against.`;
+  else if (mode === "spawn") text = `Tap a square to place the new ${$("spawnTeam").value} ${KIND[$("spawnType").value]}.`;
+  $("hintText").textContent = text;
+  $("hint").classList.toggle("active", mode !== null);
+  $("cancel").hidden = mode === null;
+}
+
+function renderSelected() {
+  const u = unitById(selectedId);
+  const box = $("selected");
+  if (!u) { box.hidden = true; return; }
+  box.hidden = false;
+  $("selName").textContent = u.id;
+  const facts = [`${u.team === "blue" ? "Blue" : "Red"} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}`];
+  if (!u.alive) facts.push("destroyed");
+  else {
+    facts.push(`health ${Math.round(u.hp)}`);
+    if (u.team === "blue") facts.push(`integrity ${u.integrity.toFixed(2)}`);
+    if (u.order.action === "move") facts.push(`moving to ${u.order.tx}, ${u.order.ty}`);
+    if (u.order.action === "jam") facts.push("ordered to jam");
+    if (u.targetId) facts.push(`attacking ${u.targetId}`);
+    if (u.order.action === "defend") facts.push(`defending against ${u.order.targetId}`);
+  }
+  $("selFacts").textContent = facts.join(", ") + ".";
+  const orders = $("orders");
+  orders.replaceChildren();
+  if (!u.alive) return;
+  const add = (label, fn, cls) => html("button", { type: "button", textContent: label, className: cls ?? "", onclick: fn }, orders);
+  add("Move", () => setMode("move"));
+  if (u.type === "jammer") add("Jam", () => order({ id: u.id, action: "jam" }));
+  if (u.type === "jet" || u.type === "missile") add("Launch", () => setMode("launch"));
+  if (u.type === "hq") add("Defend", () => setMode("defend"));
+  add("Cease", () => order({ id: u.id, action: "cease" }));
+}
+
+function meter(cls, value, marks = []) {
+  const m = html("div", { className: "meter " + cls });
+  html("i", {}, m).style.width = pct(value);
+  for (const at of marks) html("b", {}, m).style.left = pct(at);
+  return m;
+}
+
+function unitRow(u, parent) {
+  const li = html("li", {}, parent);
+  const row = html("button", { type: "button", className: "row" + (u.alive ? "" : " gone") }, li);
+  row.setAttribute("aria-pressed", String(u.id === selectedId));
+  row.onclick = () => onUnit(u.id);
+  html("span", { className: "id", textContent: u.id }, row);
+  return row;
+}
+
+function renderLists() {
+  const contacts = $("contacts"); contacts.replaceChildren();
+  const reds = world.units.filter((u) => u.team === "red");
+  if (!reds.length) html("li", { className: "empty", textContent: "No red units on the map." }, contacts);
+  for (const u of reds) {
+    const row = unitRow(u, contacts);
+    const t = world.tracks.find((k) => k.sourceUnitId === u.id);
+    if (!u.alive || !t) {
+      html("small", { textContent: u.alive ? "Not tracked" : `${KIND[u.type]}, destroyed or expended` }, row);
+      html("span", { className: "tag benign", textContent: "gone" }, row);
+      continue;
+    }
+    const mid = html("div", { className: "pair" }, row);
+    mid.appendChild(meter(t.threatLabel, t.threatScore, [t.watchAt ?? 0.33, t.hostileAt ?? 0.66]));
+    html("small", { textContent: `${KIND[u.type]}, threat ${t.threatScore.toFixed(2)}, signal ${t.snr.toFixed(2)}` }, mid);
+    html("span", { className: "tag " + t.threatLabel, textContent: t.threatLabel }, row);
+  }
+
+  const blue = $("blue"); blue.replaceChildren();
+  const blues = world.units.filter((u) => u.team === "blue");
+  if (!blues.length) html("li", { className: "empty", textContent: "No blue units on the map." }, blue);
+  for (const u of blues) {
+    const row = unitRow(u, blue);
+    if (!u.alive) {
+      html("small", { textContent: `${KIND[u.type]}, destroyed` }, row);
+      html("span", { className: "tag benign", textContent: "lost" }, row);
+      continue;
+    }
+    const mid = html("div", { className: "pair" }, row);
+    mid.appendChild(meter("blue", u.hp / 100));
+    html("small", { textContent: `${KIND[u.type]}, health ${Math.round(u.hp)}, integrity ${u.integrity.toFixed(2)}` }, mid);
+    html("span", { className: "tag" + (u.integrity < 0.99 ? " watch" : " benign"), textContent: u.integrity < 0.99 ? "jammed" : "clear" }, row);
+  }
+
+  const log = $("log"); log.replaceChildren();
+  const events = [...world.events].reverse();
+  if (!events.length) html("li", { className: "empty", textContent: "Nothing has happened yet." }, log);
+  for (const e of events) {
+    const li = html("li", {}, log);
+    html("span", { className: "t", textContent: "Tick " + e.tick }, li);
+    const what = e.kind === "destroyed" ? `${e.detail} destroyed` : e.kind === "expended" ? `${e.detail} expended` : e.detail;
+    html("span", { textContent: what }, li);
+  }
+}
+
+function render() {
+  if (!world) return;
+  if (selectedId && !unitById(selectedId)) { selectedId = null; mode = mode === "spawn" ? mode : null; }
+  $("tick").textContent = "Tick " + world.tick;
+  renderMap();
+  renderHint();
+  renderSelected();
+  renderLists();
+}
+
+async function order(body) {
+  mode = null;
+  const why = $("why").value.trim();
+  if (why) body.reason = why;
+  if (await api("/api/order", body)) $("why").value = "";
+}
+
+async function loadDecisions() {
+  try {
+    const data = await (await fetch("/api/decisions")).json();
+    if (data.ok) { decisions = data.decisions; renderDecisions(); }
+  } catch { /* the log is a convenience; the map still works without it */ }
+}
+
+function renderDecisions() {
+  const list = $("decisions"); list.replaceChildren();
+  if (!decisions.length) { html("li", { className: "empty", textContent: "No orders yet. Each order is recorded here with the threat picture it was made on." }, list); return; }
+  for (const d of [...decisions].reverse()) {
+    const li = html("li", {}, list);
+    const a = d.args || {};
+    let what = d.command === "reset" ? "Reset scenario" : d.command === "spawn" ? `Add ${a.team} ${a.type} at ${a.x}, ${a.y}` : `${a.id} ${a.action}`;
+    if (d.command === "order" && a.target) what += ` ${a.target}`;
+    if (d.command === "order" && a.tx !== undefined) what += ` to ${a.tx}, ${a.ty}`;
+    html("span", { className: "what" + (d.ok ? "" : " refused"), textContent: what + (d.ok ? "" : " (refused)") }, li);
+    html("small", { textContent: `Tick ${d.tick}, by ${d.actor}` + (d.ok ? "" : `, ${d.error}`) }, li);
+    if (d.reason) html("small", { textContent: `Reason: ${d.reason}` }, li);
+    const top = [...(d.picture || [])].sort((x, y) => y.score - x.score).slice(0, 3);
+    if (top.length) html("small", { textContent: "Picture then: " + top.map((p) => `${p.id} ${p.label} ${Number(p.score).toFixed(2)}`).join(", ") }, li);
+  }
+}
+
+function onUnit(id) {
+  if ((mode === "launch" || mode === "defend") && selectedId && id !== selectedId) {
+    order({ id: selectedId, action: mode, target: id });
+    return;
+  }
+  selectedId = selectedId === id && mode === null ? null : id;
+  mode = null;
+  render();
+}
+
+async function onCell(x, y) {
+  if (mode === "move" && selectedId) {
+    await order({ id: selectedId, action: "move", tx: x, ty: y });
+  } else if (mode === "spawn") {
+    mode = null;
+    await api("/api/spawn", { type: $("spawnType").value, team: $("spawnTeam").value, x, y });
+  } else if (mode === null && selectedId) {
+    selectedId = null;
+    render();
+  }
+}
+
+$("tick1").onclick = () => api("/api/tick", { n: 1 });
+$("tick5").onclick = () => api("/api/tick", { n: 5 });
+$("reset").onclick = async () => { selectedId = null; mode = null; await api("/api/reset", {}); };
+$("cancel").onclick = () => setMode(null);
+$("spawnGo").onclick = () => { selectedId = null; setMode("spawn"); $("map").scrollIntoView({ block: "center", behavior: "smooth" }); };
+$("spawnTeam").onchange = $("spawnType").onchange = () => renderHint();
+
+api("/api/state");
+</script>
+</body>
+</html>

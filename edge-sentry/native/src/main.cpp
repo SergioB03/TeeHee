@@ -1,0 +1,321 @@
+#include "world.hpp"
+#include "json_mini.hpp"
+
+#include <ctime>
+#include <map>
+#include <set>
+
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+void usage() {
+  std::cerr
+      << "edge-sim — abstract terrain EW / air sandbox (game math only)\n"
+      << "Usage:\n"
+      << "  edge-sim --world <path> status\n"
+      << "  edge-sim --world <path> reset\n"
+      << "  edge-sim --world <path> tick [--n N]\n"
+      << "  edge-sim --world <path> score\n"
+      << "  edge-sim --world <path> spawn --type <sensor|relay|jammer|jet|missile|hq> --team <blue|red> --x N --y N\n"
+      << "  edge-sim --world <path> order --id ID --action <move|jam|launch|cease|defend> [--tx N --ty N] [--target ID]\n"
+      << "  edge-sim --world <path> decisions [--n N]     last N entries of the decision log (default 20)\n"
+      << "  edge-sim inputs                               names of the learned model's inputs, in order\n"
+      << "Options:\n"
+      << "  --scorer <learned|heuristic>   which threat scorer fills threatScore (default learned)\n"
+      << "  --actor <name>                 who is issuing this command, recorded in the decision log (default cli)\n"
+      << "  --reason <text>                why, recorded in the decision log\n"
+      << "  --no-log                       do not write to the decision log (bulk rollouts)\n"
+      << "The decision log is <world path>.decisions.jsonl: one JSON line per reset, spawn and order,\n"
+      << "with the threat picture the decision was made on.\n";
+}
+
+std::string readFile(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) return {};
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+bool writeFile(const std::string& path, const std::string& data) {
+  std::ofstream out(path);
+  if (!out) return false;
+  out << data;
+  return static_cast<bool>(out);
+}
+
+World loadOrInit(const std::string& path) {
+  const std::string raw = readFile(path);
+  if (raw.empty()) {
+    World w = World::defaultScenario();
+    writeFile(path, w.toJson(true));
+    return w;
+  }
+  return World::fromJson(raw);
+}
+
+// Parsed command line. Options that take a value consume the next token, so
+// a value can never be mistaken for a flag (a reason of "--no-log" or a unit
+// id of "--scorer" stays plain text).
+struct Args {
+  std::map<std::string, std::string> values;
+  std::set<std::string> flags;
+  std::string command;
+};
+
+bool isCommand(const std::string& a) {
+  return a == "status" || a == "reset" || a == "tick" || a == "score" || a == "spawn" || a == "order" ||
+         a == "decisions" || a == "inputs";
+}
+
+Args parseArgs(const std::vector<std::string>& raw) {
+  static const std::set<std::string> kTakesValue = {
+      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team",
+      "--x",     "--y",      "--id",    "--action", "--tx",     "--ty",   "--target"};
+  Args out;
+  for (size_t i = 0; i < raw.size(); ++i) {
+    const std::string& a = raw[i];
+    if (kTakesValue.count(a)) {
+      out.flags.insert(a);
+      if (i + 1 < raw.size()) out.values[a] = raw[++i];
+    } else if (a.rfind("-", 0) == 0) {
+      out.flags.insert(a);
+    } else if (out.command.empty() && isCommand(a)) {
+      out.command = a;
+    }
+  }
+  return out;
+}
+
+std::string argValue(const Args& args, const std::string& key) {
+  const auto it = args.values.find(key);
+  return it == args.values.end() ? std::string() : it->second;
+}
+
+bool hasFlag(const Args& args, const std::string& key) {
+  return args.flags.count(key) > 0;
+}
+
+constexpr int kMaxTicksPerCall = 1000;
+constexpr size_t kMaxReasonChars = 300;
+
+std::string nowUtc() {
+  const std::time_t t = std::time(nullptr);
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&t));
+  return buf;
+}
+
+bool validActor(const std::string& s) {
+  if (s.empty() || s.size() > 24) return false;
+  for (char c : s) {
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_')) return false;
+  }
+  return true;
+}
+
+// The threat picture a decision was made on: one entry per tracked contact
+// with its label, score and the model inputs an operator would point to.
+std::string pictureJson(const World& w) {
+  static const char* const kShown[] = {"proximity", "closing", "heading", "intercept", "blueInField", "recentFire", "stopTicks"};
+  const auto& names = modelInputNames();
+  std::vector<std::string> out;
+  for (const auto& t : w.tracks) {
+    std::ostringstream o;
+    o << "{\"id\":" << jsonString(t.sourceUnitId)
+      << ",\"label\":" << jsonString(t.threat.label)
+      << ",\"score\":" << t.threat.score
+      << ",\"scorer\":" << jsonString(t.threat.scorer)
+      << ",\"inputs\":{";
+    bool first = true;
+    for (const char* key : kShown) {
+      for (size_t i = 0; i < names.size() && i < t.threat.observed.size(); ++i) {
+        if (names[i] != key) continue;
+        o << (first ? "" : ",") << jsonString(key) << ":" << t.threat.observed[i];
+        first = false;
+      }
+    }
+    o << "}}";
+    out.push_back(o.str());
+  }
+  return "[" + joinComma(out) + "]";
+}
+
+std::string lastLines(const std::string& path, int n) {
+  std::ifstream in(path);
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty()) lines.push_back(line);
+  }
+  const size_t start = lines.size() > static_cast<size_t>(n) ? lines.size() - static_cast<size_t>(n) : 0;
+  return joinComma(std::vector<std::string>(lines.begin() + static_cast<long>(start), lines.end()));
+}
+
+// Whole-string integer parse. Returns false instead of throwing so bad CLI
+// input becomes a JSON error rather than an abort.
+bool parseInt(const std::string& s, int& out) {
+  if (s.empty()) return false;
+  try {
+    size_t used = 0;
+    const int v = std::stoi(s, &used);
+    if (used != s.size()) return false;
+    out = v;
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+  std::vector<std::string> raw;
+  for (int i = 1; i < argc; ++i) raw.emplace_back(argv[i]);
+  const Args args = parseArgs(raw);
+
+  if (raw.empty() || hasFlag(args, "--help") || hasFlag(args, "-h")) {
+    usage();
+    return raw.empty() ? 2 : 0;
+  }
+
+  if (args.command == "inputs") {
+    std::vector<std::string> names;
+    for (const auto& n : modelInputNames()) names.push_back(jsonString(n));
+    std::cout << "{\"ok\":true,\"command\":\"inputs\",\"inputs\":[" << joinComma(names) << "]}\n";
+    return 0;
+  }
+
+  const std::string worldPath = argValue(args, "--world");
+  if (worldPath.empty()) {
+    std::cerr << "{\"error\":\"missing --world path\"}\n";
+    return 2;
+  }
+
+  // Must be set before the world loads: loading rescores every track.
+  if (hasFlag(args, "--scorer")) {
+    const std::string scorer = argValue(args, "--scorer");
+    if (scorer == "learned") World::activeScorer = ScorerKind::Learned;
+    else if (scorer == "heuristic") World::activeScorer = ScorerKind::Heuristic;
+    else {
+      std::cout << "{\"ok\":false,\"error\":\"bad --scorer (expected learned or heuristic)\"}\n";
+      return 1;
+    }
+  }
+
+  const std::string cmd = args.command;
+  if (cmd.empty()) {
+    std::cerr << "{\"error\":\"missing command\"}\n";
+    usage();
+    return 2;
+  }
+
+  const std::string logPath = worldPath + ".decisions.jsonl";
+  if (cmd == "decisions") {
+    int n = 20;
+    const std::string ns = argValue(args, "--n");
+    if (!ns.empty() && (!parseInt(ns, n) || n < 1 || n > 500)) {
+      std::cout << "{\"ok\":false,\"error\":\"bad --n (expected integer 1..500)\"}\n";
+      return 1;
+    }
+    std::cout << "{\"ok\":true,\"command\":\"decisions\",\"decisions\":[" << lastLines(logPath, n) << "]}\n";
+    return 0;
+  }
+
+  std::string actor = "cli";
+  if (hasFlag(args, "--actor")) {
+    actor = argValue(args, "--actor");
+    if (!validActor(actor)) {
+      std::cout << "{\"ok\":false,\"error\":\"bad --actor (letters, digits, - and _, up to 24)\"}\n";
+      return 1;
+    }
+  }
+  std::string reason = argValue(args, "--reason");
+  if (reason.size() > kMaxReasonChars) reason.resize(kMaxReasonChars);
+
+  World world = loadOrInit(worldPath);
+  std::string err;
+  // Decisions are judged against the picture they were made on, so capture
+  // it before the command changes anything.
+  const bool isDecision = (cmd == "reset" || cmd == "spawn" || cmd == "order") && !hasFlag(args, "--no-log");
+  const int tickBefore = world.tick;
+  const std::string pictureBefore = isDecision ? pictureJson(world) : std::string();
+
+  if (cmd == "reset") {
+    world.reset();
+  } else if (cmd == "status") {
+    // no-op
+  } else if (cmd == "score") {
+    world.scoreAllTracks();
+  } else if (cmd == "tick") {
+    int n = 1;
+    const std::string ns = argValue(args, "--n");
+    if (!ns.empty() && (!parseInt(ns, n) || n < 1 || n > kMaxTicksPerCall)) {
+      err = "bad --n (expected integer 1..1000)";
+    } else {
+      for (int i = 0; i < n; ++i) world.tickOnce();
+    }
+  } else if (cmd == "spawn") {
+    UnitType type = UnitType::Sensor;
+    Team team = Team::Blue;
+    int x = 0, y = 0;
+    if (!unitTypeFromString(argValue(args, "--type"), type)) err = "bad --type";
+    else if (!teamFromString(argValue(args, "--team"), team)) err = "bad --team";
+    else if (!parseInt(argValue(args, "--x"), x) || !parseInt(argValue(args, "--y"), y)) {
+      err = "missing or bad --x/--y";
+    } else if (world.spawn(type, team, x, y, &err)) {
+      world.scoreAllTracks();
+    }
+  } else if (cmd == "order") {
+    OrderAction action = OrderAction::None;
+    const std::string id = argValue(args, "--id");
+    int tx = -1, ty = -1;
+    const std::string txs = argValue(args, "--tx");
+    const std::string tys = argValue(args, "--ty");
+    if (!orderFromString(argValue(args, "--action"), action)) err = "bad --action";
+    else if (!txs.empty() && !parseInt(txs, tx)) err = "bad --tx";
+    else if (!tys.empty() && !parseInt(tys, ty)) err = "bad --ty";
+    else {
+      const std::string target = argValue(args, "--target");
+      if (world.issueOrder(id, action, tx, ty, target, &err)) world.scoreAllTracks();
+    }
+  }
+
+  if (isDecision) {
+    std::ostringstream entry;
+    entry << "{\"at\":" << jsonString(nowUtc())
+          << ",\"tick\":" << tickBefore
+          << ",\"actor\":" << jsonString(actor)
+          << ",\"command\":" << jsonString(cmd)
+          << ",\"args\":{";
+    static const char* const kLogged[] = {"--id", "--action", "--tx", "--ty", "--target", "--type", "--team", "--x", "--y"};
+    bool first = true;
+    for (const char* key : kLogged) {
+      if (!hasFlag(args, key)) continue;
+      entry << (first ? "" : ",") << jsonString(std::string(key).substr(2)) << ":" << jsonString(argValue(args, key));
+      first = false;
+    }
+    entry << "},\"reason\":" << jsonString(reason)
+          << ",\"ok\":" << (err.empty() ? "true" : "false")
+          << ",\"error\":" << jsonString(err)
+          << ",\"picture\":" << pictureBefore << "}\n";
+    std::ofstream log(logPath, std::ios::app);
+    if (log) log << entry.str();
+  }
+
+  if (!err.empty()) {
+    std::cout << "{\"ok\":false,\"error\":\"" << err << "\"}\n";
+    return 1;
+  }
+
+  if (!writeFile(worldPath, world.toJson(true))) {
+    std::cout << "{\"ok\":false,\"error\":\"failed to write world\"}\n";
+    return 1;
+  }
+
+  std::cout << "{\"ok\":true,\"command\":\"" << cmd << "\",\"world\":" << world.toJson(false) << "}\n";
+  return 0;
+}

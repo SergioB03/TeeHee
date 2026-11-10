@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: edge-sentry
+
+jobs:
+  simulator:
+    name: Simulator, model and web console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build edge-sim
+        run: npm run build:native
+      - name: CLI regression tests
+        run: npm test
+      - name: Model evaluation (held-out metrics, scenarios, C++/Python parity)
+        run: npm run eval:model
+      - name: Results file is up to date
+        run: git diff --exit-code -- ml/RESULTS.md
+      - name: Outcome evaluation (triage policies, quick version)
+        run: npm run eval:outcome
+      - name: Web console smoke test
+        run: |
+          PORT=3100 node web/server.mjs &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:3100/api/state >/dev/null && break; sleep 0.5; done
+          curl -sf http://127.0.0.1:3100/ | grep -q "edge-sentry console"
+          curl -sf -X POST -H 'content-type: application/json' -d '{"n":3}' http://127.0.0.1:3100/api/tick | grep -q '"ok":true'
+          curl -sf -X POST -H 'content-type: application/json' -d '{"id":"B-HQ","action":"defend","target":"R-JET1","reason":"ci smoke"}' http://127.0.0.1:3100/api/order | grep -q '"ok":true'
+          curl -sf http://127.0.0.1:3100/api/decisions | grep -q '"reason":"ci smoke"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"n":999}' http://127.0.0.1:3100/api/tick)" = 400
+
+  typecheck:
+    name: TypeScript check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: edge-sentry/package-lock.json
+      - run: npm ci
+      - run: npm run check
