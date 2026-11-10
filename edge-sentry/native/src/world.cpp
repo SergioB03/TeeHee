@@ -552,6 +552,9 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
   u->order.tx = tx;
   u->order.ty = ty;
   u->order.tz = (action == OrderAction::Move) ? tz : -1;
+  // A move replaces an attack: without this the unit kept steering at its
+  // old target while also flying to the new point.
+  if (action == OrderAction::Move) u->targetId.clear();
   u->order.targetId = targetId;
   if (!targetId.empty()) u->targetId = targetId;
   events.push_back({tick, "order", id + " " + orderToString(action)});

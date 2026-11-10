@@ -86,7 +86,25 @@ button.go { background: var(--ink); color: var(--paper); border-color: var(--ink
   background: var(--paper-raised);
 }
 #map { display: block; width: 100%; height: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
-#map text { font-family: var(--label); }
+#map text, #map3d text { font-family: var(--label); }
+#map3d { display: block; width: 100%; height: auto; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
+#map3d .unit { transition: none; }
+#map[hidden], #map3d[hidden] { display: none; }
+.g3-ground { fill: var(--paper); stroke: var(--ink-soft); stroke-width: 0.8; }
+.placing .g3-ground { cursor: crosshair; }
+.g3-ceiling { fill: none; stroke: var(--line); stroke-width: 0.7; stroke-dasharray: 3 3; }
+.g3-post { stroke: var(--line); stroke-width: 0.7; }
+.g3-level { fill: var(--ink-soft); font-size: 8.5px; font-weight: 500; text-anchor: end; dominant-baseline: central; }
+.g3-ridge { fill: var(--line); stroke: var(--ink-soft); stroke-width: 0.8; }
+.g3-stalk { stroke: var(--ink-soft); stroke-width: 0.9; }
+.g3-shadow { fill: var(--ink); opacity: 0.22; }
+.viewbar { display: flex; gap: 8px; align-items: center; margin: 10px 0 8px; }
+.viewbar .seg { display: flex; flex: 1; }
+.viewbar .seg button { flex: 1; border-radius: 0; margin-left: -1px; }
+.viewbar .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.viewbar .seg button:last-child { border-radius: 0 6px 6px 0; }
+.viewbar .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.viewbar .turn { min-width: 44px; padding: 0 10px; }
 .grid line { stroke: var(--line); stroke-width: 0.6; }
 .axis text { fill: var(--ink-soft); font-size: 10px; font-weight: 500; }
 .cover { fill: none; stroke: var(--ink-soft); stroke-width: 0.9; }
@@ -109,7 +127,11 @@ button.go { background: var(--ink); color: var(--paper); border-color: var(--ink
 .unit.red .hp { fill: var(--red); }
 .unit .ring { fill: none; stroke: var(--ink); stroke-width: 1.6; opacity: 0; }
 .unit.selected .ring { opacity: 1; }
-.unit .strike { stroke: var(--ink-soft); stroke-width: 1.4; opacity: 0; }
+.unit .strike { stroke: var(--ink-soft); stroke-width: 1.4; opacity: 0; pointer-events: none; }
+.unit .icon { stroke: none; pointer-events: none; }
+.unit.blue .icon { fill: var(--blue); }
+.unit.red .icon { fill: var(--red); }
+.unit text.alt { font-size: 8.5px; font-weight: 600; fill: var(--ink); paint-order: stroke; stroke: var(--paper-raised); stroke-width: 2.5px; }
 .unit.dead { opacity: 0.4; }
 .unit.dead .strike { opacity: 1; }
 .unit.dead .hp-track, .unit.dead .hp { opacity: 0; }
@@ -216,7 +238,17 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </section>
 
+  <div class="viewbar">
+    <div class="seg" role="group" aria-label="Map view">
+      <button id="view2d" type="button" aria-pressed="true">Flat map</button>
+      <button id="view3d" type="button" aria-pressed="false">3D view</button>
+    </div>
+    <button class="turn" id="turnLeft" type="button" aria-label="Turn the 3D view left" hidden>&#8630;</button>
+    <button class="turn" id="turnRight" type="button" aria-label="Turn the 3D view right" hidden>&#8631;</button>
+  </div>
+
   <div class="chart">
+    <svg id="map3d" role="group" aria-label="3D battlefield, altitude shown as height" hidden></svg>
     <svg id="map" role="group" aria-label="Sandbox map">
       <g id="L-grid"></g>
       <g id="L-jam"></g>
@@ -265,6 +297,9 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
       </select>
       <select id="spawnType" aria-label="Unit type">
         <option value="jet">Jet</option>
+        <option value="stealth">Stealth fighter</option>
+        <option value="bomber">Bomber</option>
+        <option value="drone">Drone</option>
         <option value="missile">Missile</option>
         <option value="jammer">Jammer</option>
         <option value="sensor">Sensor</option>
@@ -275,7 +310,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </details>
 
-  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer, JT jet, MS missile. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
+  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows altitude as height; drag sideways to turn it. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
 </div>
 
 <div class="clock"><div>
@@ -287,8 +322,20 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const CELL = 30, LEFT = 20, TOP = 3, BOTTOM = 18;
-const ABBR = { hq: "HQ", sensor: "SN", relay: "RL", jammer: "JM", jet: "JT", missile: "MS" };
-const KIND = { hq: "headquarters", sensor: "sensor", relay: "relay", jammer: "jammer", jet: "jet", missile: "missile" };
+const ABBR = { hq: "HQ", sensor: "SN", relay: "RL", jammer: "JM", jet: "JT", missile: "MS", stealth: "SF", bomber: "BM", drone: "DR" };
+const KIND = { hq: "headquarters", sensor: "sensor", relay: "relay", jammer: "jammer", jet: "jet", missile: "missile",
+               stealth: "stealth fighter", bomber: "bomber", drone: "drone" };
+// Highest altitude level each aircraft type can reach (the simulator enforces it).
+const CEIL = { jet: 5, stealth: 5, bomber: 5, drone: 2, missile: 5 };
+const isAir = (u) => u.type in CEIL;
+// Generic top-down silhouettes, nose up, in a 20 x 20 box.
+const ICON = {
+  jet: "M0,-9 L2,-3 L8,3 L8,5 L2,3 L2,7 L4,9 L-4,9 L-2,7 L-2,3 L-8,5 L-8,3 L-2,-3 Z",
+  stealth: "M0,-9 L2.5,-4 L9,4 L5,4 L6,9 L2,7 L0,8 L-2,7 L-6,9 L-5,4 L-9,4 L-2.5,-4 Z",
+  bomber: "M0,-6 L10,4 L6,5 L3,3 L0,5 L-3,3 L-6,5 L-10,4 Z",
+  drone: "M0,-8 L1,-2 L10,-1 L10,1 L1,2 L1,6 L4,9 L-4,9 L-1,6 L-1,2 L-10,1 L-10,-1 L-1,-2 Z",
+  missile: "M0,-9 L1.5,-6 L1.5,4 L4,8 L1.5,7 L0,9 L-1.5,7 L-4,8 L-1.5,4 L-1.5,-6 Z",
+};
 
 let world = null;
 let selectedId = null;
@@ -296,6 +343,11 @@ let mode = null; // null | "move" | "launch" | "defend" | "spawn"
 let decisions = [];
 let game = null;          // { side, tick, limit, over, missionValue, hits, blocked, lost } while a game is on
 let enemyOrders = [];     // what the computer opponent ordered on the last advance
+let view = "2d";          // "2d" flat map or "3d" battlefield
+let yaw = -0.55;          // 3D view rotation about the vertical axis, radians
+try {
+  view = localStorage.getItem("edge-sentry-view") === "3d" ? "3d" : "2d";
+} catch { /* storage can be unavailable; the default view is fine */ }
 
 // Each visitor gets their own sandbox: a random id kept in this browser.
 function sessionId() {
@@ -417,11 +469,16 @@ function makeUnit(u) {
     svg("polygon", { class: "ring", points: "0,-18 19,0 0,18 -19,0" }, g);
     svg("polygon", { class: "frame", points: "0,-13 14,0 0,13 -14,0" }, g);
   }
-  svg("text", { x: 0, y: 0.5 }, g).textContent = ABBR[u.type] ?? "?";
+  if (ICON[u.type]) {
+    svg("path", { class: "icon", d: ICON[u.type] }, g);
+    svg("text", { class: "alt", x: u.team === "blue" ? 17 : 15, y: -11 }, g);
+  } else {
+    svg("text", { x: 0, y: 0.5 }, g).textContent = ABBR[u.type] ?? "?";
+  }
   svg("rect", { class: "hp-track", x: -11, y: 12.5, width: 22, height: 2.5 }, g);
   svg("rect", { class: "hp", x: -11, y: 12.5, width: 22, height: 2.5 }, g);
   svg("line", { class: "strike", x1: -12, y1: 10, x2: 12, y2: -10 }, g);
-  const pick = () => onUnit(g.dataset.id);
+  const pick = () => { if (!dragged) onUnit(g.dataset.id); };
   g.addEventListener("click", pick);
   g.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
@@ -429,7 +486,135 @@ function makeUnit(u) {
   return g;
 }
 
+// Which way a unit is pointed, as a map vector: its last move, else toward
+// its target, else toward the other side of the map.
+function headingOf(u) {
+  let hx = u.x - u.px, hy = u.y - u.py;
+  const tgt = u.targetId ? unitById(u.targetId) : null;
+  if (!hx && !hy && tgt) { hx = tgt.x - u.x; hy = tgt.y - u.y; }
+  if (!hx && !hy) hx = u.team === "blue" ? 1 : -1;
+  return [hx, hy];
+}
+
+function dressUnit(el, u, angle) {
+  el.classList.toggle("dead", !u.alive);
+  el.classList.toggle("selected", u.id === selectedId);
+  el.querySelector(".hp").setAttribute("width", (Math.max(0, Math.min(100, u.hp)) / 100) * 22);
+  const icon = el.querySelector(".icon");
+  if (icon) {
+    icon.setAttribute("transform", `rotate(${angle.toFixed(1)}) scale(${u.type === "bomber" ? 0.8 : 0.72})`);
+    el.querySelector(".alt").textContent = u.alive ? u.z : "";
+  }
+  const where = isAir(u) ? `${u.x}, ${u.y}, level ${u.z}` : `${u.x}, ${u.y}`;
+  el.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${where}${u.alive ? "" : ", destroyed"}`);
+}
+
+// ---- 3D view: a hand-rolled projection, altitude drawn as height ------------
+const V3 = { W: 384, H: 306, CX: 196, CY: 200, S: 21, K: 0.5, ZS: 16 };
+let dragged = false;
+
+function proj(x, y, z) {
+  const dx = x - world.width / 2, dy = y - world.height / 2;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const xr = dx * c - dy * s, yr = dx * s + dy * c;
+  return [V3.CX + xr * V3.S, V3.CY + yr * V3.S * V3.K - z * V3.ZS, yr];
+}
+const pts = (list) => list.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+
+function render3d() {
+  const root = $("map3d");
+  root.setAttribute("viewBox", `0 0 ${V3.W} ${V3.H}`);
+  root.classList.toggle("placing", mode === "move" || mode === "spawn");
+  root.replaceChildren();
+  const W = world.width, H = world.height, TOPZ = world.ceiling ?? 5;
+  const line = (cls, a, b, parent = root) => svg("line", { class: cls, x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, parent);
+
+  const corners = [[0, 0], [W, 0], [W, H], [0, H]];
+  const ground = svg("polygon", { class: "g3-ground", points: pts(corners.map(([x, y]) => proj(x, y, 0))) }, root);
+  ground.addEventListener("click", (e) => {
+    if (dragged) return;
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(root.getScreenCTM().inverse());
+    const xr = (pt.x - V3.CX) / V3.S, yr = (pt.y - V3.CY) / (V3.S * V3.K);
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    const x = Math.floor(xr * c + yr * s + W / 2), y = Math.floor(-xr * s + yr * c + H / 2);
+    if (x >= 0 && y >= 0 && x < W && y < H) onCell(x, y);
+  });
+  const grid = svg("g", { class: "grid", "pointer-events": "none" }, root);
+  for (let i = 0; i <= W; i++) line("", proj(i, 0, 0), proj(i, H, 0), grid);
+  for (let j = 0; j <= H; j++) line("", proj(0, j, 0), proj(W, j, 0), grid);
+
+  const flat = svg("g", { "pointer-events": "none" }, root);
+  for (const u of world.units) {
+    if (u.alive && u.type === "jammer" && u.jamRadius > 0) {
+      const [x, y] = proj(u.x + 0.5, u.y + 0.5, 0);
+      svg("ellipse", { class: "jam", cx: x, cy: y, rx: u.jamRadius * V3.S, ry: u.jamRadius * V3.S * V3.K }, flat);
+    }
+  }
+  // Cover: low ridges, one level high, that hide anything at level 0 or 1 behind them.
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!world.cover[y * W + x]) continue;
+      const base = [[x + 0.15, y + 0.15], [x + 0.85, y + 0.15], [x + 0.85, y + 0.85], [x + 0.15, y + 0.85]];
+      for (const [bx, by] of base) line("g3-stalk", proj(bx, by, 0), proj(bx, by, 1), flat);
+      svg("polygon", { class: "g3-ridge", points: pts(base.map(([bx, by]) => proj(bx, by, 1))) }, flat);
+    }
+  }
+  // Airspace: corner posts, the ceiling, and a level scale on the leftmost post.
+  const posts = corners.map(([x, y]) => [proj(x, y, 0), proj(x, y, TOPZ)]);
+  for (const [a, b] of posts) line("g3-post", a, b, flat);
+  svg("polygon", { class: "g3-ceiling", points: pts(posts.map((p) => p[1])) }, flat);
+  const left = corners[posts.reduce((best, p, i) => (p[0][0] < posts[best][0][0] ? i : best), 0)];
+  for (let z = 1; z <= TOPZ; z++) {
+    const [x, y] = proj(left[0], left[1], z);
+    line("g3-post", [x - 4, y], [x, y], flat);
+    svg("text", { class: "g3-level", x: x - 6, y }, flat).textContent = z;
+  }
+
+  const at = (u) => proj(u.x + 0.5, u.y + 0.5, u.z);
+  for (const u of world.units) {
+    if (!u.alive) continue;
+    if ((u.order.action === "move" || u.order.action === "orbit") && u.order.tx >= 0 && u.order.ty >= 0) {
+      line("route", at(u), proj(u.order.tx + 0.5, u.order.ty + 0.5, u.order.tz >= 0 ? u.order.tz : u.z), flat);
+    }
+    const tgt = u.targetId ? unitById(u.targetId) : null;
+    if (tgt && tgt.alive) line("aim", at(u), at(tgt), flat);
+    const covered = u.order.action === "defend" ? unitById(u.order.targetId) : null;
+    if (covered && covered.alive) line("cover-line", at(u), at(covered), flat);
+  }
+
+  // Far units first so nearer ones draw over them.
+  const order = [...world.units].sort((a, b) => Number(a.alive) - Number(b.alive) || at(a)[2] - at(b)[2]);
+  const stack = new Map();
+  for (const u of order) {
+    const [gx, gy] = proj(u.x + 0.5, u.y + 0.5, 0);
+    let [x, y] = at(u);
+    // Units sharing a cell and level are fanned out so each can be tapped.
+    const key = u.x + "," + u.y + "," + u.z;
+    const n = stack.get(key) ?? 0;
+    stack.set(key, n + 1);
+    x += n * 12; y -= n * 8;
+    if (u.z > 0 && u.alive) {
+      svg("ellipse", { class: "g3-shadow", cx: gx, cy: gy, rx: 6, ry: 3, "pointer-events": "none" }, root);
+      line("g3-stalk", [gx, gy], [x, y]).setAttribute("pointer-events", "none");
+    }
+    const el = makeUnit(u);
+    el.dataset.id = u.id;
+    el.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(0.8)`);
+    const [hx, hy] = headingOf(u);
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    dressUnit(el, u, Math.atan2(hx * c - hy * s, -(hx * s + hy * c) * V3.K) * 180 / Math.PI);
+    root.appendChild(el);
+  }
+}
+
 function renderMap() {
+  // SVG elements have no .hidden property, so set the attribute.
+  $("map").toggleAttribute("hidden", view !== "2d");
+  $("map3d").toggleAttribute("hidden", view !== "3d");
+  $("turnLeft").hidden = $("turnRight").hidden = view !== "3d";
+  $("view2d").setAttribute("aria-pressed", String(view === "2d"));
+  $("view3d").setAttribute("aria-pressed", String(view === "3d"));
+  if (view === "3d") { render3d(); return; }
   buildGrid();
   $("map").classList.toggle("placing", mode === "move" || mode === "spawn");
 
@@ -465,10 +650,8 @@ function renderMap() {
     const i = stack.get(key) ?? 0;
     stack.set(key, i + 1);
     el.style.transform = `translate(${cx(u.x) + i * 7}px, ${cy(u.y) - i * 7}px)`;
-    el.classList.toggle("dead", !u.alive);
-    el.classList.toggle("selected", u.id === selectedId);
-    el.querySelector(".hp").setAttribute("width", (Math.max(0, Math.min(100, u.hp)) / 100) * 22);
-    el.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}${u.alive ? "" : ", destroyed"}`);
+    const [hx, hy] = headingOf(u);
+    dressUnit(el, u, Math.atan2(hx, -hy) * 180 / Math.PI);
     if (u.alive) layer.appendChild(el); else layer.insertBefore(el, layer.firstChild);
   }
   for (const [id, el] of unitEls) if (!seen.has(id)) { el.remove(); unitEls.delete(id); }
@@ -492,12 +675,15 @@ function renderSelected() {
   if (!u) { box.hidden = true; return; }
   box.hidden = false;
   $("selName").textContent = u.id;
-  const facts = [`${u.team === "blue" ? "Blue" : "Red"} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}`];
+  const air = isAir(u);
+  const facts = [`${u.team === "blue" ? "Blue" : "Red"} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}${air ? ", level " + u.z : ""}`];
   if (!u.alive) facts.push("destroyed");
   else {
     facts.push(`health ${Math.round(u.hp)}`);
     if (u.team === "blue") facts.push(`integrity ${u.integrity.toFixed(2)}`);
     if (u.order.action === "move") facts.push(`moving to ${u.order.tx}, ${u.order.ty}`);
+    if (u.order.action === "altitude") facts.push(`${u.order.tz > u.z ? "climbing" : "descending"} to level ${u.order.tz}`);
+    if (u.order.action === "orbit") facts.push("orbiting");
     if (u.order.action === "jam") facts.push("ordered to jam");
     if (u.targetId) facts.push(`attacking ${u.targetId}`);
     if (u.order.action === "defend") facts.push(`defending against ${u.order.targetId}`);
@@ -512,7 +698,14 @@ function renderSelected() {
   const add = (label, fn, cls) => html("button", { type: "button", textContent: label, className: cls ?? "", onclick: fn }, orders);
   add("Move", () => setMode("move"));
   if (u.type === "jammer") add("Jam", () => order({ id: u.id, action: "jam" }));
-  if (u.type === "jet" || u.type === "missile") add("Launch", () => setMode("launch"));
+  if (air) {
+    // Climb and dive go one level per tap, counted from the level already ordered.
+    const base = u.order.action === "altitude" ? u.order.tz : u.z;
+    if (base < CEIL[u.type]) add("Climb", () => order({ id: u.id, action: "altitude", tz: base + 1 }));
+    if (base > 0) add("Dive", () => order({ id: u.id, action: "altitude", tz: base - 1 }));
+    if (u.type !== "missile") add("Orbit", () => order({ id: u.id, action: "orbit" }));
+    add("Launch", () => setMode("launch"));
+  }
   if (u.type === "hq") add("Defend", () => setMode("defend"));
   add("Cease", () => order({ id: u.id, action: "cease" }));
 }
@@ -547,7 +740,8 @@ function renderLists() {
     }
     const mid = html("div", { className: "pair" }, row);
     mid.appendChild(meter(t.threatLabel, t.threatScore, [t.watchAt ?? 0.33, t.hostileAt ?? 0.66]));
-    html("small", { textContent: `${KIND[u.type]}, threat ${t.threatScore.toFixed(2)}, signal ${t.snr.toFixed(2)}` }, mid);
+    const level = isAir(u) ? ` at level ${t.z}` : "";
+    html("small", { textContent: `${KIND[u.type]}${level}, threat ${t.threatScore.toFixed(2)}, signal ${t.snr.toFixed(2)}${t.locked === false ? ", no lock" : ""}` }, mid);
     html("span", { className: "tag " + t.threatLabel, textContent: t.threatLabel }, row);
   }
 
@@ -563,7 +757,7 @@ function renderLists() {
     }
     const mid = html("div", { className: "pair" }, row);
     mid.appendChild(meter("blue", u.hp / 100));
-    html("small", { textContent: `${KIND[u.type]}, health ${Math.round(u.hp)}, integrity ${u.integrity.toFixed(2)}` }, mid);
+    html("small", { textContent: `${KIND[u.type]}${isAir(u) ? " at level " + u.z : ""}, health ${Math.round(u.hp)}, integrity ${u.integrity.toFixed(2)}` }, mid);
     html("span", { className: "tag" + (u.integrity < 0.99 ? " watch" : " benign"), textContent: u.integrity < 0.99 ? "jammed" : "clear" }, row);
   }
 
@@ -589,8 +783,8 @@ function renderGame() {
   $("gameStatus").textContent = `You command ${you}. Tick ${game.tick} of ${game.limit}. Blue mission value ${value}%.`;
   $("gameBrief").hidden = game.tick > 0;
   $("gameBrief").textContent = you === "blue"
-    ? "Red is about to attack. You have one defense: tap HQ, choose Defend, then tap a red contact. It covers one contact at a time, so pick the one that matters. You can also move your units."
-    : "Blue's defense is run by the trained threat model and covers one contact at a time. Tap your units to launch, move or jam, and try to break through before tick 20.";
+    ? "Red is about to attack with missiles, a bomber, a jet, a stealth fighter and a drone. Tap HQ, choose Defend, then tap a red contact: point defense covers one contact at a time and needs a lock on it. Your stealth fighter B-F1 can shoot aircraft down: tap it, choose Launch, then tap a red aircraft."
+    : "Blue's point defense and its fighter are run by the trained threat model. Tap your units to launch, move, climb, dive, orbit or jam. Attackers must come down to hit, and anything flying low behind cover is hard for blue to lock. Break through before tick 20.";
   const moves = enemyOrders.map((o) => {
     const what = o.action === "move" ? `${o.id} moves to ${o.tx}, ${o.ty}` : `${o.id} ${o.action}${o.target ? " " + o.target : ""}`;
     return `${what} (${o.reason})`;
@@ -604,8 +798,8 @@ function renderGame() {
   if (game.over) {
     const lost = game.lost === 1 ? "1 unit" : `${game.lost} units`;
     $("gameResult").textContent = you === "blue"
-      ? `Game over. You kept ${value}% of blue's mission value. Red landed ${game.hits} hits, you blocked ${game.blocked}, and you lost ${lost}.`
-      : `Game over. You cut blue to ${value}% of its mission value. You landed ${game.hits} hits, the model blocked ${game.blocked}, and blue lost ${lost}.`;
+      ? `Game over. You kept ${value}% of blue's mission value. Red landed ${game.hits} hits, you blocked ${game.blocked} and shot down ${game.shotDown}, and you lost ${lost}.`
+      : `Game over. You cut blue to ${value}% of its mission value. You landed ${game.hits} hits, the model blocked ${game.blocked} and shot down ${game.shotDown} of yours, and blue lost ${lost}.`;
   }
   $("tick1").disabled = $("tick5").disabled = game.over;
 }
@@ -688,7 +882,34 @@ $("again").onclick = () => game && startGame(game.side);
 $("switchSides").onclick = () => game && startGame(game.side === "blue" ? "red" : "blue");
 $("leaveGame").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; await api("/api/game/end", {}); };
 $("cancel").onclick = () => setMode(null);
-$("spawnGo").onclick = () => { selectedId = null; setMode("spawn"); $("map").scrollIntoView({ block: "center", behavior: "smooth" }); };
+
+function setView(next) {
+  view = next;
+  try { localStorage.setItem("edge-sentry-view", view); } catch { /* not saved; fine */ }
+  render();
+}
+$("view2d").onclick = () => setView("2d");
+$("view3d").onclick = () => setView("3d");
+$("turnLeft").onclick = () => { yaw -= Math.PI / 8; render(); };
+$("turnRight").onclick = () => { yaw += Math.PI / 8; render(); };
+// Drag sideways on the 3D view to turn it. Vertical drags still scroll the page.
+{
+  const root = $("map3d");
+  let start = null, frame = 0;
+  root.addEventListener("pointerdown", (e) => { start = { x: e.clientX, yaw, id: e.pointerId, moved: false }; dragged = false; });
+  root.addEventListener("pointermove", (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x;
+    if (!start.moved && Math.abs(dx) < 8) return;
+    if (!start.moved) { start.moved = true; dragged = true; root.setPointerCapture(e.pointerId); }
+    yaw = start.yaw + dx * 0.012;
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; if (world) render3d(); });
+  });
+  const end = () => { start = null; setTimeout(() => { dragged = false; }, 0); };
+  root.addEventListener("pointerup", end);
+  root.addEventListener("pointercancel", end);
+}
+$("spawnGo").onclick = () => { selectedId = null; setMode("spawn"); document.querySelector(".chart").scrollIntoView({ block: "center", behavior: "smooth" }); };
 $("spawnTeam").onchange = $("spawnType").onchange = () => renderHint();
 
 api("/api/state");

@@ -295,6 +295,9 @@ check("move with --tz finishes when both position and level are reached",
       (f["x"], f["y"], f["z"]) == (5, 11, 1) and f["order"]["action"] == "none")
 
 sim("reset")
+code, out = sim("order", "--id", "R-MSL1", "--action", "move", "--tx", "11", "--ty", "11", "--no-log")
+check("a move order replaces a standing attack", unit(out["world"], "R-MSL1")["targetId"] == "")
+sim("reset")
 sim("order", "--id", "R-JET1", "--action", "orbit", "--no-log")
 path = []
 for _ in range(4):
