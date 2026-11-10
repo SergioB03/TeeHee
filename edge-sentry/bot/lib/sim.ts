@@ -92,11 +92,29 @@ export async function runSim(
   await ensureBinary();
   await mkdir(workspaceDir, { recursive: true });
   const world = worldPathFor(workspaceDir);
-  const { stdout, stderr } = await execFileAsync(
-    simBinary,
-    ["--world", world, ...args],
-    { maxBuffer: 2 * 1024 * 1024 },
-  );
+  let stdout = "";
+  let stderr = "";
+  try {
+    ({ stdout, stderr } = await execFileAsync(
+      simBinary,
+      ["--world", world, ...args],
+      { maxBuffer: 2 * 1024 * 1024 },
+    ));
+  } catch (err) {
+    // edge-sim exits non-zero for rejected commands but still prints
+    // {"ok":false,"error":...}. execFile rejects on any non-zero exit, so
+    // recover that output here instead of letting the tool throw.
+    const failed = err as { stdout?: unknown; stderr?: unknown; message?: string };
+    stdout = String(failed.stdout ?? "");
+    stderr = String(failed.stderr ?? "");
+    if (!stdout && !stderr) {
+      return {
+        ok: false,
+        error: failed.message ?? "edge-sim failed to run",
+        raw: "",
+      };
+    }
+  }
   const raw = String(stdout || stderr || "").trim();
   try {
     const parsed = JSON.parse(raw) as {

@@ -167,6 +167,9 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
   }
   if (action == OrderAction::Cease) {
     u->order = {};
+    // Also drop the standing target: tickOnce() engages whenever targetId is
+    // set, so leaving it meant a "ceased" jet/missile kept attacking.
+    u->targetId.clear();
     events.push_back({tick, "order", id + " cease"});
     return true;
   }
@@ -177,6 +180,22 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
   if (action == OrderAction::Launch && !(u->type == UnitType::Jet || u->type == UnitType::Missile)) {
     if (err) *err = "only jet/missile can launch";
     return false;
+  }
+  if (action == OrderAction::Move && (tx < 0 || ty < 0 || tx >= width || ty >= height)) {
+    if (err) *err = "move needs --tx/--ty inside the map";
+    return false;
+  }
+  if (action == OrderAction::Launch) {
+    const std::string& want = targetId.empty() ? u->targetId : targetId;
+    const Unit* tgt = want.empty() ? nullptr : findUnit(want);
+    if (!tgt || !tgt->alive) {
+      if (err) *err = "launch target not found or destroyed";
+      return false;
+    }
+    if (tgt == u) {
+      if (err) *err = "unit cannot target itself";
+      return false;
+    }
   }
   u->order.action = action;
   u->order.tx = tx;
@@ -416,12 +435,32 @@ World World::fromJson(const std::string& json) {
       extractStringField(obj, "targetId", u.targetId);
       // alive
       u.alive = obj.find("\"alive\":false") == std::string::npos;
-      // nested order — best effort
-      extractStringField(obj, "action", action);
-      orderFromString(action, u.order.action);
-      extractIntField(obj, "tx", u.order.tx);
-      extractIntField(obj, "ty", u.order.ty);
+      // nested order — read from the "order" sub-object so its targetId is
+      // not confused with the unit-level targetId above
+      const auto orderPos = obj.find("\"order\"");
+      if (orderPos != std::string::npos) {
+        const std::string orderObj = obj.substr(orderPos);
+        extractStringField(orderObj, "action", action);
+        orderFromString(action, u.order.action);
+        extractIntField(orderObj, "tx", u.order.tx);
+        extractIntField(orderObj, "ty", u.order.ty);
+        extractStringField(orderObj, "targetId", u.order.targetId);
+      }
       w.units.push_back(u);
+    }
+  }
+
+  // Restore the event log. Each CLI call is a fresh process, so without this
+  // every command started again from the single "scenario" line and earlier
+  // engage/destroyed events were lost.
+  if (json.find("\"events\"") != std::string::npos) {
+    w.events.clear();
+    for (const auto& obj : splitObjects(extractArrayBody(json, "events"))) {
+      SimEvent e;
+      extractIntField(obj, "tick", e.tick);
+      extractStringField(obj, "kind", e.kind);
+      extractStringField(obj, "detail", e.detail);
+      w.events.push_back(e);
     }
   }
 

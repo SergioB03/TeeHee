@@ -55,6 +55,23 @@ bool hasFlag(const std::vector<std::string>& args, const std::string& key) {
   for (const auto& a : args) if (a == key) return true;
   return false;
 }
+
+constexpr int kMaxTicksPerCall = 1000;
+
+// Whole-string integer parse. Returns false instead of throwing so bad CLI
+// input becomes a JSON error rather than an abort.
+bool parseInt(const std::string& s, int& out) {
+  if (s.empty()) return false;
+  try {
+    size_t used = 0;
+    const int v = std::stoi(s, &used);
+    if (used != s.size()) return false;
+    out = v;
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -97,35 +114,34 @@ int main(int argc, char** argv) {
   } else if (cmd == "tick") {
     int n = 1;
     const std::string ns = argValue(args, "--n");
-    if (!ns.empty()) n = std::max(1, std::stoi(ns));
-    for (int i = 0; i < n; ++i) world.tickOnce();
+    if (!ns.empty() && (!parseInt(ns, n) || n < 1 || n > kMaxTicksPerCall)) {
+      err = "bad --n (expected integer 1..1000)";
+    } else {
+      for (int i = 0; i < n; ++i) world.tickOnce();
+    }
   } else if (cmd == "spawn") {
     UnitType type = UnitType::Sensor;
     Team team = Team::Blue;
+    int x = 0, y = 0;
     if (!unitTypeFromString(argValue(args, "--type"), type)) err = "bad --type";
     else if (!teamFromString(argValue(args, "--team"), team)) err = "bad --team";
-    else {
-      int x = std::stoi(argValue(args, "--x"));
-      int y = std::stoi(argValue(args, "--y"));
-      if (!world.spawn(type, team, x, y, &err)) {
-        // err set
-      } else {
-        world.scoreAllTracks();
-      }
+    else if (!parseInt(argValue(args, "--x"), x) || !parseInt(argValue(args, "--y"), y)) {
+      err = "missing or bad --x/--y";
+    } else if (world.spawn(type, team, x, y, &err)) {
+      world.scoreAllTracks();
     }
   } else if (cmd == "order") {
     OrderAction action = OrderAction::None;
     const std::string id = argValue(args, "--id");
+    int tx = -1, ty = -1;
+    const std::string txs = argValue(args, "--tx");
+    const std::string tys = argValue(args, "--ty");
     if (!orderFromString(argValue(args, "--action"), action)) err = "bad --action";
+    else if (!txs.empty() && !parseInt(txs, tx)) err = "bad --tx";
+    else if (!tys.empty() && !parseInt(tys, ty)) err = "bad --ty";
     else {
-      int tx = -1, ty = -1;
-      const std::string txs = argValue(args, "--tx");
-      const std::string tys = argValue(args, "--ty");
-      if (!txs.empty()) tx = std::stoi(txs);
-      if (!tys.empty()) ty = std::stoi(tys);
       const std::string target = argValue(args, "--target");
-      world.issueOrder(id, action, tx, ty, target, &err);
-      world.scoreAllTracks();
+      if (world.issueOrder(id, action, tx, ty, target, &err)) world.scoreAllTracks();
     }
   }
 

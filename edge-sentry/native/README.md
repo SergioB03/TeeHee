@@ -13,6 +13,12 @@ cmake --build build
 
 Binary: `native/build/edge-sim`
 
+## Tests
+
+```bash
+python3 tests/test_cli.py   # CLI regression checks, stdlib only
+```
+
 ## Commands
 
 ```bash
