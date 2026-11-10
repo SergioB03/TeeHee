@@ -20,5 +20,9 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "@opentelemetry/core": "^2.8.0",
+    "minimatch": "^11.0.1"
   }
 }
