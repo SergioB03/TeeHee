@@ -70,13 +70,13 @@ flowchart LR
 
 ## Try it
 
-Phone console, no model login and no `npm install`:
+Console for phone and desktop, no model login and no `npm install`:
 
 ```bash
 npm run web          # builds edge-sim if needed, serves http://localhost:3100
 ```
 
-Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend order with an optional reason, and advance ticks. Switch between the flat map and a 3D view that shows altitude as height (drag sideways to turn it). The decision log at the bottom of the page shows each order with the threat picture at that moment. On Replit, import the repo and press Run; the root `.replit` file runs the same script.
+Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend order with an optional reason, and advance ticks. The 3D view (the default) draws every aircraft as a figure at its altitude with a shadow below it, nose up or down as it climbs or dives, banked while it orbits, and missiles leave a bright trail; drag sideways to turn it, or switch to the flat map. On a wide screen the map fills the left side and stays in view while contacts, orders and logs sit in a panel on the right (Space advances a tick, the arrow keys turn the view). The decision log at the bottom of the page shows each order with the threat picture at that moment. On Replit, import the repo and press Run; the root `.replit` file runs the same script.
 
 **Play a side.** Press *Play as blue* or *Play as red* for a 20-tick game against the computer:
 
