@@ -1,0 +1,15 @@
+# Replit: the Run button builds the C++ simulator and starts the phone console.
+# No npm install is needed for this; the server uses Node built-ins only.
+run = "bash edge-sentry/web/run.sh"
+modules = ["nodejs-20"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["gcc"]
+
+[[ports]]
+localPort = 3100
+externalPort = 80
+
+[deployment]
+run = ["bash", "edge-sentry/web/run.sh"]
