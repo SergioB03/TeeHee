@@ -9,11 +9,11 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 | Scorer | AUC | AUC, air contacts only | Precision at hostile | Recall at hostile | F1 |
 | --- | --- | --- | --- | --- | --- |
 | Learned model (observable inputs and track history) | 0.968 | 0.938 | 0.85 | 0.89 | 0.87 |
-| Sequence model (GRU, per-tick inputs only, learns its own history) | 0.964 | 0.931 | 0.83 | 0.88 | 0.86 |
+| Sequence model (GRU, per-tick inputs only, learns its own history) | 0.967 | 0.938 | 0.86 | 0.89 | 0.87 |
 | Heuristic that reads the contact's target | 0.868 | 0.942 | 0.86 | 0.45 | 0.59 |
 | Original heuristic (observable inputs only) | 0.742 | 0.585 | 0.55 | 0.05 | 0.10 |
 
-"At hostile" means at or above each scorer's hostile cut-off: 0.43 for the learned model, 0.49 for the sequence model (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. Air contacts (jets and missiles) are the hard cases: 8560 rows, 30% positive.
+"At hostile" means at or above each scorer's hostile cut-off: 0.43 for the learned model, 0.39 for the sequence model (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. Air contacts (aircraft and missiles) are the hard cases: 8560 rows, 30% positive.
 
 ## Scripted scenarios (19 cases with a known right call)
 
@@ -29,8 +29,8 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 | Attacker stands down while still far away | pass | pass | pass | pass |
 | Idle jet turns attacker mid-run | pass | pass | pass | FAIL: hit at tick 12, hostile never |
 | Harmless red ground unit beside a relay | pass | pass | pass | pass |
-| Jammer drives into range of a relay | FAIL: hostile at tick 0 | pass | pass | pass |
-| Missile fired across the whole map | pass | FAIL: hit at tick 10, hostile never | pass | FAIL: hit at tick 10, hostile never |
+| Jammer drives into range of a relay | FAIL: hostile at tick 0 | FAIL: hostile at tick 0 | pass | pass |
+| Missile fired across the whole map | pass | pass | pass | FAIL: hit at tick 10, hostile never |
 | Two jets, only one attacks | pass | pass | FAIL: hit at tick 5, hostile never | FAIL: hit at tick 5, hostile never |
 | Missile that has no target | pass | pass | pass | pass |
 | Stealth fighter attack run on headquarters | pass | pass | pass | FAIL: hit at tick 6, hostile never |
@@ -42,4 +42,4 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 
 C++ and Python implementations of the model agree to within 1e-5 on every held-out row.
 
-The sequence model is a GRU with 16 hidden units trained with PyTorch 2.15.0 (`ml/train_seq.py`, 115 epochs). It sees 20 per-tick inputs and none of the hand-built history inputs, and edge-sim carries its hidden state for each contact from tick to tick. Its C++ and Python implementations agree to within 1e-5 on every held-out row.
+The sequence model is a GRU with 16 hidden units trained with PyTorch 2.15.0 (`ml/train_seq.py`, 98 epochs). It sees 20 per-tick inputs and none of the hand-built history inputs, and edge-sim carries its hidden state for each contact from tick to tick. Its C++ and Python implementations agree to within 1e-5 on every held-out row.
