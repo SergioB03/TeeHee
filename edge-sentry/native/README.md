@@ -34,4 +34,6 @@ python3 tests/test_cli.py   # CLI regression checks, stdlib only
 
 `src/aiml_scorer.cpp` maps track features → `{benign, watch, hostile}`.
 
+Feature vector (6): speed, snr, jamPressure, proximityBlue, altitudeHint, closingOnBlue.
+
 v1 uses a weighted heuristic. Later: dump `features` + labels, train a small classifier, swap the scorer body without changing the agent tools.

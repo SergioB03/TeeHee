@@ -20,7 +20,7 @@ export default defineTool({
       ok: true,
       tick: result.world?.tick,
       tracks: result.world?.tracks,
-      note: "AIML v1 = heuristic classifier head; swap native/src/aiml_scorer.cpp later.",
+      note: "AIML v1 = heuristic head (speed,snr,jam,prox,alt,closingOnBlue); swap aiml_scorer.cpp later.",
     };
   },
 });

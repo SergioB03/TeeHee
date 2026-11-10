@@ -8,11 +8,12 @@
 // Swap scoreTrack() internals for a trained model without changing the sim API.
 
 struct TrackFeatures {
-  double speed = 0;          // cells per tick
-  double snr = 0;            // sensor quality 0..1
-  double jamPressure = 0;    // 0..1 how hard this track is jammed/jamming
-  double proximityBlue = 0;  // 0..1 closer to blue assets => higher
-  double altitudeHint = 0;   // 0 ground-ish .. 1 air-ish (from unit type prior)
+  double speed = 0;           // cells per tick
+  double snr = 0;             // sensor quality 0..1
+  double jamPressure = 0;     // 0..1 emitter strength or EW cover
+  double proximityBlue = 0;   // 0..1 closer to blue assets => higher
+  double altitudeHint = 0;    // 0 ground-ish .. 1 air-ish (from unit type prior)
+  double closingOnBlue = 0;   // 0..1 actively targeting / homing on blue
 };
 
 struct ThreatScore {

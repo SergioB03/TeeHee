@@ -4,11 +4,14 @@
 #include <cmath>
 
 namespace {
-constexpr double W_SPEED = 0.20;
-constexpr double W_SNR = 0.10;
-constexpr double W_JAM = 0.30;
-constexpr double W_PROX = 0.25;
-constexpr double W_ALT = 0.15;
+// Weights sum to 1.0. closingOnBlue lets a fast air contact cross hostile
+// without needing to sit inside a jam field (see REVIEW_FINDINGS #6).
+constexpr double W_SPEED = 0.15;
+constexpr double W_SNR = 0.08;
+constexpr double W_JAM = 0.18;
+constexpr double W_PROX = 0.20;
+constexpr double W_ALT = 0.12;
+constexpr double W_CLOSE = 0.27;
 
 double clamp01(double v) {
   return std::max(0.0, std::min(1.0, v));
@@ -16,22 +19,24 @@ double clamp01(double v) {
 }  // namespace
 
 ThreatScore scoreTrack(const TrackFeatures& f) {
+  const double speedN = clamp01(f.speed / 3.0);
+  const double snrN = clamp01(f.snr);
+  const double jamN = clamp01(f.jamPressure);
+  const double proxN = clamp01(f.proximityBlue);
+  const double altN = clamp01(f.altitudeHint);
+  const double closeN = clamp01(f.closingOnBlue);
+
   const double logit =
-      W_SPEED * clamp01(f.speed / 3.0) +
-      W_SNR * (1.0 - clamp01(f.snr)) +  // low SNR under EW pressure looks worse
-      W_JAM * clamp01(f.jamPressure) +
-      W_PROX * clamp01(f.proximityBlue) +
-      W_ALT * clamp01(f.altitudeHint);
+      W_SPEED * speedN +
+      W_SNR * (1.0 - snrN) +  // low SNR under EW pressure looks worse
+      W_JAM * jamN +
+      W_PROX * proxN +
+      W_ALT * altN +
+      W_CLOSE * closeN;
 
   ThreatScore out;
   out.score = clamp01(logit);
-  out.features = {
-      clamp01(f.speed / 3.0),
-      clamp01(f.snr),
-      clamp01(f.jamPressure),
-      clamp01(f.proximityBlue),
-      clamp01(f.altitudeHint),
-  };
+  out.features = {speedN, snrN, jamN, proxN, altN, closeN};
 
   if (out.score >= 0.66) out.label = "hostile";
   else if (out.score >= 0.33) out.label = "watch";

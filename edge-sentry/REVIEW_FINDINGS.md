@@ -13,8 +13,8 @@ This file is for whoever picks the branch up next (Cursor agent or human). It li
 | 3 | Bad numeric arguments abort the process | Medium | Fixed here |
 | 4 | Invalid orders are accepted silently | Medium | Fixed here |
 | 5 | `bot/lib/sim.ts` throws on every rejected command | High | Fixed here (run-tested, not type-checked) |
-| 6 | Threat scorer almost never says `hostile` | Design | Open |
-| 7 | Default scenario never exercises jamming | Design | Open |
+| 6 | Threat scorer almost never says `hostile` | Design | Fixed on `cursor/edge-sentry-0858` |
+| 7 | Default scenario never exercises jamming | Design | Fixed on `cursor/edge-sentry-0858` |
 | 8 | Smaller notes (see below) | Low | Open |
 
 ## What was tested
@@ -83,27 +83,17 @@ Fix: `issueOrder` rejects a move outside the map and a launch whose target is mi
 
 Fix: `runSim` catches the rejection and parses the captured stdout. Verified by running the original and the fixed file under Node: the original throws, the fixed version returns `{ ok: false, error: 'only jammers can jam' }`.
 
-## Open findings (not changed here)
+## Design follow-ups (addressed on `cursor/edge-sentry-0858`)
 
-### 6. Threat scorer almost never says `hostile`
+### 6. Threat scorer almost never says `hostile` — fixed
 
-With the weights in `native/src/aiml_scorer.cpp`, a red missile homing on B-HQ stays `watch` (about 0.53 to 0.55) all the way to impact. Spawning each red unit type on every cell of the default map:
+Added `closingOnBlue` feature + reweighted scorer so a homing missile can reach `hostile` without sitting in a jam field. `jamFieldAt` is team-aware (only opposing jammers). See `native/src/aiml_scorer.cpp` and `scoreAllTracks()`.
 
-| Type | `benign` | `watch` | `hostile` |
-| --- | --- | --- | --- |
-| jammer | 0 | 144 | 0 |
-| jet | 0 | 143 | 1 |
-| missile | 0 | 136 | 8 |
+### 7. Default scenario never exercises jamming — fixed
 
-The only `hostile` cells are the ones inside the red jammer's own field, because `jamPressure` is taken from the field at the contact's position regardless of team. The score range over that sweep was 0.19 to 0.81, but for a missile outside a jam field the practical ceiling is below the 0.66 threshold: `speed` (0.20) + `altitude` (0.13) + `proximity` (up to 0.25) + low-SNR (up to 0.10, but SNR rises as the contact gets close, so the last two cancel).
+Moved `R-J1` to `(5,6)` and apply an integrity pass on scenario load so `B-R1` starts under the jam cone.
 
-Suggestions: add a closing-on-blue feature (heading toward a blue asset), or re-weight so a fast, high, near contact can cross the `hostile` line on its own. `jamFieldAt` ignores its `against` parameter; decide whether jam pressure should be team-aware.
-
-### 7. Default scenario never exercises jamming
-
-`R-J1` sits at (9,8) with radius 3. The nearest blue unit is 5.8 cells away, so blue `integrity` stays 1.0 for the whole default run and the EW mechanic is invisible in a first demo. Moving the jammer to (5,6) drops `B-R1` integrity to 0.63. Consider starting it closer, or giving it a default move order.
-
-### 8. Smaller notes
+### 8. Smaller notes (still open)
 
 - A unit with both a `move` order and a target moves twice per tick (once in the order pass, once in the engage pass).
 - The `jam` order has no effect: a jammer's radius is always active, and `cease` does not switch it off.

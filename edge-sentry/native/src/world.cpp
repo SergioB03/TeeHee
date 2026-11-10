@@ -100,11 +100,19 @@ World World::defaultScenario() {
   add("B-S1", UnitType::Sensor, Team::Blue, 2, 3);
   add("B-S2", UnitType::Sensor, Team::Blue, 3, 8);
   add("B-R1", UnitType::Relay, Team::Blue, 4, 5);
-  add("R-J1", UnitType::Jammer, Team::Red, 9, 8, 3);
+  // Close enough that B-R1 starts under the jam cone (REVIEW_FINDINGS #7).
+  add("R-J1", UnitType::Jammer, Team::Red, 5, 6, 3);
   add("R-JET1", UnitType::Jet, Team::Red, 10, 2);
   add("R-MSL1", UnitType::Missile, Team::Red, 8, 3);
 
   w.units.back().targetId = "B-HQ";
+  // Apply one integrity pass so the first status shows EW effects.
+  for (auto& u : w.units) {
+    if (!u.alive || u.team != Team::Blue) continue;
+    if (!(u.type == UnitType::Sensor || u.type == UnitType::Relay || u.type == UnitType::HQ)) continue;
+    const double jam = w.jamFieldAt(u.x, u.y, Team::Blue);
+    u.integrity = std::max(0.2, 1.0 - 0.7 * jam);
+  }
   w.events.push_back({0, "scenario", "default perimeter / EW sandbox loaded"});
   w.scoreAllTracks();
   return w;
@@ -128,11 +136,13 @@ double World::dist(int x1, int y1, int x2, int y2) const {
   return std::sqrt(dx * dx + dy * dy);
 }
 
-double World::jamFieldAt(int x, int y, Team /*against*/) const {
+double World::jamFieldAt(int x, int y, Team against) const {
+  // Only opposing jammers contribute (team-aware EW).
   double pressure = 0;
   for (const auto& u : units) {
     if (!u.alive || u.type != UnitType::Jammer) continue;
     if (u.jamRadius <= 0) continue;
+    if (against != Team::Unknown && u.team == against) continue;
     const double d = dist(u.x, u.y, x, y);
     if (d <= u.jamRadius) {
       pressure = std::max(pressure, 1.0 - (d / static_cast<double>(u.jamRadius)));
@@ -244,10 +254,24 @@ void World::scoreAllTracks() {
     if (u.type == UnitType::Jet) f.speed = std::max(f.speed, 2.0);
     if (u.type == UnitType::Missile) f.speed = std::max(f.speed, 3.0);
     f.snr = t.snr;
-    f.jamPressure = (u.type == UnitType::Jammer) ? 0.9 : jamFieldAt(u.x, u.y, Team::Blue);
+    // Emitters score as jam pressure; other contacts use friendly red EW cover.
+    f.jamPressure = (u.type == UnitType::Jammer)
+                        ? 0.9
+                        : jamFieldAt(u.x, u.y, Team::Blue);
     f.proximityBlue = prox;
     f.altitudeHint = (u.type == UnitType::Jet || u.type == UnitType::Missile) ? 0.85 :
                      (u.type == UnitType::Jammer ? 0.35 : 0.2);
+
+    bool closing = false;
+    if (!u.targetId.empty()) {
+      const Unit* tgt = findUnit(u.targetId);
+      closing = tgt && tgt->alive && tgt->team == Team::Blue;
+    }
+    if (!closing && u.order.action == OrderAction::Launch && !u.order.targetId.empty()) {
+      const Unit* tgt = findUnit(u.order.targetId);
+      closing = tgt && tgt->alive && tgt->team == Team::Blue;
+    }
+    f.closingOnBlue = closing ? 1.0 : 0.0;
 
     t.threat = scoreTrack(f);
     tracks.push_back(t);

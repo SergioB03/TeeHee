@@ -50,6 +50,16 @@ check("reset returns ok JSON", code == 0 and out and out["ok"] and out["world"][
 check("default scenario has 7 units and 3 red tracks",
       len(out["world"]["units"]) == 7 and len(out["world"]["tracks"]) == 3)
 
+# --- default EW + AIML labels (REVIEW_FINDINGS #6 / #7) -----------------------
+relay = unit(out["world"], "B-R1")
+check("default jammer degrades B-R1 integrity", relay["integrity"] < 0.95)
+tracks = {t["sourceUnitId"]: t for t in out["world"]["tracks"]}
+check("homing missile track is hostile", tracks["R-MSL1"]["threatLabel"] == "hostile")
+check("idle jet track is not hostile", tracks["R-JET1"]["threatLabel"] != "hostile")
+check("jammer track is at least watch", tracks["R-J1"]["threatLabel"] in ("watch", "hostile"))
+check("AIML feature vector includes closingOnBlue",
+      len(tracks["R-MSL1"].get("features") or []) == 6 and tracks["R-MSL1"]["features"][-1] == 1.0)
+
 code, out = sim("tick", "--n", "6")
 check("missile reaches and hits B-HQ by tick 6", unit(out["world"], "B-HQ")["hp"] == 60)
 
