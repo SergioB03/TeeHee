@@ -144,7 +144,7 @@ out.append("")
 seq_cut = f", {seq_model['hostile_at']:.2f} for the sequence model" if seq_model else ""
 out.append(f"\"At hostile\" means at or above each scorer's hostile cut-off: {model['hostile_at']:.2f} for the learned model"
            f"{seq_cut} (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. "
-           f"Air contacts (jets and missiles) are the hard cases: {len(air)} rows, {sum(air_labels) / len(air_labels):.0%} positive.")
+           f"Air contacts (aircraft and missiles) are the hard cases: {len(air)} rows, {sum(air_labels) / len(air_labels):.0%} positive.")
 out.append("")
 out.append(f"## Scripted scenarios ({len(SCENARIOS)} cases with a known right call)")
 out.append("")

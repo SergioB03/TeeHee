@@ -48,6 +48,9 @@ std::string unitTypeToString(UnitType t) {
     case UnitType::Jet: return "jet";
     case UnitType::Missile: return "missile";
     case UnitType::HQ: return "hq";
+    case UnitType::Stealth: return "stealth";
+    case UnitType::Bomber: return "bomber";
+    case UnitType::Drone: return "drone";
   }
   return "sensor";
 }
@@ -59,6 +62,9 @@ bool unitTypeFromString(const std::string& s, UnitType& out) {
   else if (s == "jet") out = UnitType::Jet;
   else if (s == "missile") out = UnitType::Missile;
   else if (s == "hq") out = UnitType::HQ;
+  else if (s == "stealth") out = UnitType::Stealth;
+  else if (s == "bomber") out = UnitType::Bomber;
+  else if (s == "drone") out = UnitType::Drone;
   else return false;
   return true;
 }
@@ -88,6 +94,8 @@ std::string orderToString(OrderAction a) {
     case OrderAction::Launch: return "launch";
     case OrderAction::Cease: return "cease";
     case OrderAction::Defend: return "defend";
+    case OrderAction::Altitude: return "altitude";
+    case OrderAction::Orbit: return "orbit";
   }
   return "none";
 }
@@ -99,9 +107,52 @@ bool orderFromString(const std::string& s, OrderAction& out) {
   else if (s == "launch") out = OrderAction::Launch;
   else if (s == "cease") out = OrderAction::Cease;
   else if (s == "defend") out = OrderAction::Defend;
+  else if (s == "altitude") out = OrderAction::Altitude;
+  else if (s == "orbit") out = OrderAction::Orbit;
   else return false;
   return true;
 }
+
+// Game numbers, not real performance data. The stealth fighter is fast and
+// hard to see, the bomber slow, obvious and heavy-hitting from high level,
+// the drone slow and low. Missiles may hit from any level.
+const AirProfile& profileOf(UnitType t) {
+  //                                  speed climb ceil cruise release sig   dmg  hit   a2a
+  static const AirProfile ground   = {1,    0,    0,   0,     0,      1.0,  0,   0.0,  false};
+  static const AirProfile jet      = {1,    1,    5,   3,     2,      1.0,  15,  0.6,  true};
+  static const AirProfile stealth  = {2,    2,    5,   4,     3,      0.35, 20,  0.7,  true};
+  static const AirProfile bomber   = {1,    1,    5,   4,     4,      1.3,  35,  0.5,  false};
+  static const AirProfile drone    = {1,    1,    2,   1,     1,      0.5,  8,   0.5,  false};
+  static const AirProfile missile  = {1,    1,    5,   2,     5,      0.8,  40,  1.0,  true};
+  switch (t) {
+    case UnitType::Jet: return jet;
+    case UnitType::Stealth: return stealth;
+    case UnitType::Bomber: return bomber;
+    case UnitType::Drone: return drone;
+    case UnitType::Missile: return missile;
+    default: return ground;
+  }
+}
+
+bool isAircraft(UnitType t) { return profileOf(t).ceiling > 0; }
+
+namespace {
+bool canAttack(UnitType t) { return isAircraft(t); }
+
+void stepHorizontal(Unit& u, int tx, int ty, int cells) {
+  for (int i = 0; i < cells; ++i) {
+    if (u.x < tx) ++u.x;
+    else if (u.x > tx) --u.x;
+    if (u.y < ty) ++u.y;
+    else if (u.y > ty) --u.y;
+  }
+}
+
+void stepAltitude(Unit& u, int tz, int levels) {
+  if (u.z < tz) u.z = std::min(tz, u.z + levels);
+  else if (u.z > tz) u.z = std::max(tz, u.z - levels);
+}
+}  // namespace
 
 World World::defaultScenario() {
   World w;
@@ -122,6 +173,7 @@ World World::defaultScenario() {
     u.y = y;
     u.px = x;
     u.py = y;
+    u.z = u.pz = profileOf(type).cruise;
     if (type == UnitType::Jammer) u.jamRadius = jam > 0 ? jam : 3;
     w.units.push_back(u);
   };
@@ -163,6 +215,7 @@ World World::skirmishScenario() {
     u.y = y;
     u.px = x;
     u.py = y;
+    u.z = u.pz = profileOf(type).cruise;
     if (type == UnitType::Jammer) u.jamRadius = 3;
     w.units.push_back(u);
   };
@@ -170,9 +223,12 @@ World World::skirmishScenario() {
   add("B-S1", UnitType::Sensor, Team::Blue, 2, 3);
   add("B-S2", UnitType::Sensor, Team::Blue, 3, 8);
   add("B-R1", UnitType::Relay, Team::Blue, 4, 5);
+  add("B-F1", UnitType::Stealth, Team::Blue, 2, 6);
   add("R-J1", UnitType::Jammer, Team::Red, 9, 8);
   add("R-JET1", UnitType::Jet, Team::Red, 10, 2);
-  add("R-JET2", UnitType::Jet, Team::Red, 11, 10);
+  add("R-F1", UnitType::Stealth, Team::Red, 11, 10);
+  add("R-BMR1", UnitType::Bomber, Team::Red, 11, 0);
+  add("R-DRN1", UnitType::Drone, Team::Red, 8, 11);
   add("R-MSL1", UnitType::Missile, Team::Red, 8, 3);
   add("R-MSL2", UnitType::Missile, Team::Red, 11, 6);
   w.events.push_back({0, "scenario", "skirmish loaded: nobody has orders yet"});
@@ -190,7 +246,7 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
     double bestD = 1e9;
     for (int pass = 0; pass < 2 && !best; ++pass) {
       for (const auto& b : units) {
-        if (!b.alive || b.team != Team::Blue) continue;
+        if (!b.alive || b.team != Team::Blue || isAircraft(b.type)) continue;
         const bool isHq = b.type == UnitType::HQ;
         if (sensorsFirst && pass == 0 && isHq) continue;
         const double d = dist(b.x, b.y, from.x, from.y);
@@ -212,16 +268,25 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
       }
     }
     if (!hq) return moves;
+    // Expected loss per contact: threat score x the damage its type can do.
+    auto valueOf = [&](const Track& t) -> double {
+      const Unit* u = findUnit(t.sourceUnitId);
+      if (!u || !u->alive || t.threat.learnedScore < learnedWatchAt()) return 0;
+      const double severity = u->type == UnitType::Jammer ? 3 : profileOf(u->type).damage;
+      return t.threat.learnedScore * severity;
+    };
     const Track* best = nullptr;
     double bestValue = 0;
-    for (const auto& t : tracks) {
-      const Unit* u = findUnit(t.sourceUnitId);
-      if (!u || !u->alive || t.threat.learnedScore < learnedWatchAt()) continue;
-      const double severity = u->type == UnitType::Missile ? 40 : u->type == UnitType::Jet ? 15 : u->type == UnitType::Jammer ? 3 : 0;
-      const double value = t.threat.learnedScore * severity;
-      if (value > bestValue) {
-        bestValue = value;
-        best = &t;
+    // Point defense cannot shoot at a track that is too weak, so prefer
+    // contacts it has a lock on and fall back to the rest.
+    for (int pass = 0; pass < 2 && !best; ++pass) {
+      for (const auto& t : tracks) {
+        if (pass == 0 && !t.locked) continue;
+        const double value = valueOf(t);
+        if (value > bestValue) {
+          bestValue = value;
+          best = &t;
+        }
       }
     }
     const bool defending = hq->order.action == OrderAction::Defend;
@@ -243,17 +308,49 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
       m.reason = "no contact is above the watch line";
       moves.push_back(m);
     }
+    // Blue fighters intercept the most dangerous aircraft the HQ is not covering.
+    std::vector<std::string> taken;
+    if (best) taken.push_back(best->sourceUnitId);
+    for (const auto& f : units) {
+      if (!f.alive || f.team != Team::Blue || !(f.type == UnitType::Jet || f.type == UnitType::Stealth)) continue;
+      const Unit* current = f.targetId.empty() ? nullptr : findUnit(f.targetId);
+      if (current && current->alive) {
+        taken.push_back(current->id);
+        continue;
+      }
+      const Track* pick = nullptr;
+      double pickValue = 0;
+      for (const auto& t : tracks) {
+        const Unit* u = findUnit(t.sourceUnitId);
+        if (!u || !isAircraft(u->type)) continue;
+        if (std::find(taken.begin(), taken.end(), t.sourceUnitId) != taken.end()) continue;
+        const double value = valueOf(t);
+        if (value > pickValue) {
+          pickValue = value;
+          pick = &t;
+        }
+      }
+      if (!pick) continue;
+      taken.push_back(pick->sourceUnitId);
+      OpponentMove m;
+      m.id = f.id;
+      m.action = OrderAction::Launch;
+      m.targetId = pick->sourceUnitId;
+      m.reason = "intercept " + pick->sourceUnitId + ", the most dangerous aircraft not covered by point defense";
+      moves.push_back(m);
+    }
     return moves;
   }
 
   for (const auto& u : units) {
     if (!u.alive || u.team != Team::Red) continue;
-    if (u.type == UnitType::Missile || u.type == UnitType::Jet) {
+    if (canAttack(u.type)) {
       const Unit* current = u.targetId.empty() ? nullptr : findUnit(u.targetId);
       if (current && current->alive) continue;  // already committed
-      const Unit* tgt = nearestBlue(u, u.type == UnitType::Jet);
-      if (u.type == UnitType::Missile) {
-        // Missiles go for the command post while it stands.
+      const bool heavy = u.type == UnitType::Missile || u.type == UnitType::Bomber;
+      const Unit* tgt = nearestBlue(u, !heavy);
+      if (heavy) {
+        // Missiles and bombers go for the command post while it stands.
         for (const auto& b : units) {
           if (b.alive && b.team == Team::Blue && b.type == UnitType::HQ) tgt = &b;
         }
@@ -263,7 +360,7 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
       m.id = u.id;
       m.action = OrderAction::Launch;
       m.targetId = tgt->id;
-      m.reason = u.type == UnitType::Missile ? "strike the command post" : "suppress the nearest sensor";
+      m.reason = heavy ? "strike the command post" : "suppress the nearest sensor";
       moves.push_back(m);
     } else if (u.type == UnitType::Jammer) {
       bool covering = false;
@@ -324,9 +421,16 @@ double World::jamFieldAt(int x, int y, Team against) const {
   return pressure;
 }
 
-bool World::spawn(UnitType type, Team team, int x, int y, std::string* err) {
+bool World::spawn(UnitType type, Team team, int x, int y, int z, std::string* err) {
   if (x < 0 || y < 0 || x >= width || y >= height) {
     if (err) *err = "spawn out of bounds";
+    return false;
+  }
+  const AirProfile& profile = profileOf(type);
+  if (z < 0) z = profile.cruise;
+  if (z > profile.ceiling) {
+    if (err) *err = isAircraft(type) ? "spawn altitude is above this type's ceiling of " + std::to_string(profile.ceiling)
+                                     : "ground units start at altitude 0";
     return false;
   }
   Unit u;
@@ -337,13 +441,14 @@ bool World::spawn(UnitType type, Team team, int x, int y, std::string* err) {
   u.y = y;
   u.px = x;
   u.py = y;
+  u.z = u.pz = z;
   if (type == UnitType::Jammer) u.jamRadius = 3;
   units.push_back(u);
   events.push_back({tick, "spawn", u.id + " " + unitTypeToString(type)});
   return true;
 }
 
-bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty,
+bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty, int tz,
                        const std::string& targetId, std::string* err) {
   Unit* u = findUnit(id);
   if (!u || !u->alive) {
@@ -362,9 +467,49 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
     if (err) *err = "only jammers can jam";
     return false;
   }
-  if (action == OrderAction::Launch && !(u->type == UnitType::Jet || u->type == UnitType::Missile)) {
-    if (err) *err = "only jet/missile can launch";
+  if (action == OrderAction::Launch && !canAttack(u->type)) {
+    if (err) *err = "only aircraft and missiles can launch";
     return false;
+  }
+  const AirProfile& profile = profileOf(u->type);
+  if (tz >= 0 && !isAircraft(u->type) && tz != 0) {
+    if (err) *err = "ground units stay at altitude 0";
+    return false;
+  }
+  if (tz > profile.ceiling) {
+    if (err) *err = "--tz is above this unit's ceiling of " + std::to_string(profile.ceiling);
+    return false;
+  }
+  if (action == OrderAction::Altitude) {
+    if (!isAircraft(u->type)) {
+      if (err) *err = "only aircraft can change altitude";
+      return false;
+    }
+    if (tz < 0) {
+      if (err) *err = "altitude needs --tz between 0 and " + std::to_string(profile.ceiling);
+      return false;
+    }
+    u->order = {};
+    u->order.action = action;
+    u->order.tz = tz;
+    u->targetId.clear();
+    events.push_back({tick, "order", id + " altitude " + std::to_string(tz)});
+    return true;
+  }
+  if (action == OrderAction::Orbit) {
+    if (!isAircraft(u->type) || u->type == UnitType::Missile) {
+      if (err) *err = "only aircraft can orbit";
+      return false;
+    }
+    // Circle the cell it is over now, holding altitude unless --tz is given.
+    u->order = {};
+    u->order.action = action;
+    u->order.tx = u->x;
+    u->order.ty = u->y;
+    u->order.tz = tz;
+    u->targetId.clear();
+    events.push_back({tick, "order", id + " orbit"});
+    return true;
   }
   if (action == OrderAction::Defend) {
     // Abstract point defense: an HQ covers against one contact at a time.
@@ -398,10 +543,15 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
       if (err) *err = "unit cannot target itself";
       return false;
     }
+    if (isAircraft(tgt->type) && !profile.airToAir) {
+      if (err) *err = unitTypeToString(u->type) + "s can only attack ground targets";
+      return false;
+    }
   }
   u->order.action = action;
   u->order.tx = tx;
   u->order.ty = ty;
+  u->order.tz = (action == OrderAction::Move) ? tz : -1;
   u->order.targetId = targetId;
   if (!targetId.empty()) u->targetId = targetId;
   events.push_back({tick, "order", id + " " + orderToString(action)});
@@ -467,6 +617,7 @@ void World::recordHistory() {
     u.c2 = u.c1; u.c1 = u.c0; u.c0 = k.closing;
     u.h2 = u.h1; u.h1 = u.h0; u.h0 = k.heading;
     u.r3 = u.r2; u.r2 = u.r1; u.r1 = u.r0; u.r0 = (k.nearest < 1e8) ? k.nearest : -1;
+    u.a3 = u.a2; u.a2 = u.a1; u.a1 = u.a0; u.a0 = u.z;
     if (u.x == u.px && u.y == u.py) {
       ++u.stopTicks;
     } else {
@@ -474,6 +625,35 @@ void World::recordHistory() {
       u.moved = true;
     }
   }
+}
+
+bool World::coverBetween(int x1, int y1, int x2, int y2) const {
+  const int steps = std::max(std::abs(x2 - x1), std::abs(y2 - y1));
+  for (int i = 1; i < steps; ++i) {
+    const int cx = static_cast<int>(std::lround(x1 + static_cast<double>(x2 - x1) * i / steps));
+    const int cy = static_cast<int>(std::lround(y1 + static_cast<double>(y2 - y1) * i / steps));
+    const size_t cell = static_cast<size_t>(cy * width + cx);
+    if (cx >= 0 && cy >= 0 && cx < width && cy < height && cell < cover.size() && cover[cell]) return true;
+  }
+  return false;
+}
+
+double World::observedSnr(const Unit& u) const {
+  const double signature = profileOf(u.type).signature;
+  double best = 0.15;
+  for (const auto& s : units) {
+    if (!s.alive || s.team != Team::Blue) continue;
+    if (!(s.type == UnitType::Sensor || s.type == UnitType::HQ || s.type == UnitType::Relay)) continue;
+    const double flat = dist(s.x, s.y, u.x, u.y);
+    const double up = kLevelCells * u.z;
+    const double slant = std::sqrt(flat * flat + up * up);
+    double base = std::min(1.0, std::max(0.0, 1.0 - slant / 10.0) * signature);
+    // Terrain masking: anything at level 0 or 1 hides behind cover.
+    if (u.z <= 1 && coverBetween(s.x, s.y, u.x, u.y)) base *= 0.35;
+    const double jam = jamFieldAt(s.x, s.y, Team::Blue);
+    best = std::max(best, base * (1.0 - 0.75 * jam) * s.integrity);
+  }
+  return best;
 }
 
 void World::scoreAllTracks() {
@@ -494,17 +674,10 @@ void World::scoreAllTracks() {
     // baseline scores are unchanged.
     const double orderSpeed = (u.order.action == OrderAction::Move) ? 1.0 : 0.0;
 
-    // SNR degraded by jam fields near blue sensors looking at this contact
-    double bestSnr = 0.15;
-    for (const auto& s : units) {
-      if (!s.alive || s.team != Team::Blue) continue;
-      if (!(s.type == UnitType::Sensor || s.type == UnitType::HQ || s.type == UnitType::Relay)) continue;
-      const double d = dist(s.x, s.y, u.x, u.y);
-      const double base = std::max(0.0, 1.0 - d / 10.0);
-      const double jam = jamFieldAt(s.x, s.y, Team::Blue);
-      bestSnr = std::max(bestSnr, base * (1.0 - 0.75 * jam) * s.integrity);
-    }
-    t.snr = bestSnr;
+    t.z = u.z;
+    t.vz = u.z - u.pz;
+    t.snr = observedSnr(u);
+    t.locked = t.snr >= kLockSnr;
 
     double nearestBlue = 1e9;
     for (const auto& b : units) {
@@ -515,15 +688,15 @@ void World::scoreAllTracks() {
 
     TrackFeatures f;
     f.speed = orderSpeed;
-    if (u.type == UnitType::Jet) f.speed = std::max(f.speed, 2.0);
-    if (u.type == UnitType::Missile) f.speed = std::max(f.speed, 3.0);
+    if (u.type == UnitType::Jet || u.type == UnitType::Bomber) f.speed = std::max(f.speed, 2.0);
+    if (u.type == UnitType::Missile || u.type == UnitType::Stealth) f.speed = std::max(f.speed, 3.0);
     f.snr = t.snr;
     // Emitters score as jam pressure; other contacts use friendly red EW cover.
     f.jamPressure = (u.type == UnitType::Jammer)
                         ? 0.9
                         : jamFieldAt(u.x, u.y, Team::Blue);
     f.proximityBlue = prox;
-    f.altitudeHint = (u.type == UnitType::Jet || u.type == UnitType::Missile) ? 0.85 :
+    f.altitudeHint = isAircraft(u.type) ? 0.85 :
                      (u.type == UnitType::Jammer ? 0.35 : 0.2);
 
     bool closing = false;
@@ -571,6 +744,9 @@ void World::scoreAllTracks() {
         (speedNow <= 0) ? 1.0 : 0.0,
         k.miss,
         (k.heading >= 0.98) ? 1.0 : 0.0,
+        static_cast<double>(u.z) / kCeiling,
+        std::max(0, u.pz - u.z) / 2.0,
+        std::max(0, u.z - u.pz) / 2.0,
         std::min(u.stopTicks, 6) / 6.0,
         u.moved ? 1.0 : 0.0,
         (u.r3 >= 0 && nearestBlue < 1e8) ? (u.r3 - nearestBlue) / 6.0 : 0.0,
@@ -578,6 +754,7 @@ void World::scoreAllTracks() {
         u.h1,
         u.c2,
         u.h2,
+        (u.a3 >= 0) ? std::max(0.0, u.a3 - u.z) / kCeiling : 0.0,
     };
 
     // The sequence model sees each tick exactly once: advance its hidden
@@ -600,21 +777,39 @@ void World::tickOnce() {
   for (auto& u : units) {
     u.px = u.x;
     u.py = u.y;
+    u.pz = u.z;
   }
 
   // Apply orders / movement
   for (auto& u : units) {
     if (!u.alive) continue;
+    const AirProfile& profile = profileOf(u.type);
     if (u.order.action == OrderAction::Move) {
       if (u.order.tx >= 0 && u.order.ty >= 0) {
-        if (u.x < u.order.tx) ++u.x;
-        else if (u.x > u.order.tx) --u.x;
-        if (u.y < u.order.ty) ++u.y;
-        else if (u.y > u.order.ty) --u.y;
+        stepHorizontal(u, u.order.tx, u.order.ty, profile.speed);
         u.x = clampi(u.x, 0, width - 1);
         u.y = clampi(u.y, 0, height - 1);
-        if (u.x == u.order.tx && u.y == u.order.ty) u.order.action = OrderAction::None;
+        if (u.order.tz >= 0) stepAltitude(u, u.order.tz, profile.climb);
+        const bool level = u.order.tz < 0 || u.z == u.order.tz;
+        if (u.x == u.order.tx && u.y == u.order.ty && level) u.order.action = OrderAction::None;
       }
+    }
+    if (u.order.action == OrderAction::Altitude) {
+      stepAltitude(u, u.order.tz, profile.climb);
+      if (u.z == u.order.tz) u.order.action = OrderAction::None;
+    }
+    if (u.order.action == OrderAction::Orbit) {
+      // A four-cell box beside the anchor, turned inward at the map edge.
+      const int sx = (u.order.tx + 1 < width) ? 1 : -1;
+      const int sy = (u.order.ty + 1 < height) ? 1 : -1;
+      const int ox = u.x - u.order.tx, oy = u.y - u.order.ty;
+      int nx = 0, ny = 0;
+      if (ox == 0 && oy == 0) { nx = sx; ny = 0; }
+      else if (ox == sx && oy == 0) { nx = sx; ny = sy; }
+      else if (ox == sx && oy == sy) { nx = 0; ny = sy; }
+      u.x = u.order.tx + nx;
+      u.y = u.order.ty + ny;
+      if (u.order.tz >= 0) stepAltitude(u, u.order.tz, profile.climb);
     }
     if (u.order.action == OrderAction::Jam && u.type == UnitType::Jammer) {
       // jam radius already active while order held
@@ -633,38 +828,47 @@ void World::tickOnce() {
   // Abstract engage: missiles/jets with launch or active target
   for (auto& u : units) {
     if (!u.alive) continue;
-    if (!(u.type == UnitType::Missile || u.type == UnitType::Jet)) continue;
+    if (!canAttack(u.type)) continue;
     const bool launching = u.order.action == OrderAction::Launch || !u.targetId.empty();
     if (!launching) continue;
     Unit* tgt = findUnit(u.targetId.empty() ? u.order.targetId : u.targetId);
     if (!tgt || !tgt->alive) continue;
+    const AirProfile& profile = profileOf(u.type);
+    const bool airTarget = isAircraft(tgt->type) && tgt->z > 0;
 
-    // Steer toward target
-    if (u.x < tgt->x) ++u.x;
-    else if (u.x > tgt->x) --u.x;
-    if (u.y < tgt->y) ++u.y;
-    else if (u.y > tgt->y) --u.y;
-
+    // Steer toward the target, and get to an altitude it can be hit from:
+    // level with an aircraft, down to release altitude for a ground target.
+    // A missile holds its level and dives in the last two cells.
+    stepHorizontal(u, tgt->x, tgt->y, profile.speed);
     const double d = dist(u.x, u.y, tgt->x, tgt->y);
+    if (airTarget) stepAltitude(u, tgt->z, profile.climb);
+    else if (u.type == UnitType::Missile) { if (d <= 2.0) stepAltitude(u, 0, profile.climb); }
+    else if (u.z > profile.release) stepAltitude(u, profile.release, profile.climb);
+    const bool inEnvelope = airTarget ? std::abs(u.z - tgt->z) <= 1 : u.z <= profile.release;
+
     const double jam = jamFieldAt(tgt->x, tgt->y, Team::Blue);
     // Abstract hit chance — game math only
-    double pHit = std::max(0.05, 0.55 - 0.08 * d + 0.15 * jam);
-    if (u.type == UnitType::Jet) pHit *= 0.6;
+    const double pHit = std::max(0.05, 0.55 - 0.08 * d + 0.15 * jam) * profile.hitFactor;
     // Deterministic-ish from tick+ids for reproducible demos
     const int h = static_cast<int>(u.id.size() * 17 + tgt->id.size() * 13 + tick * 31) % 100;
+    const bool wouldHit = d <= 1.5 && inEnvelope && h < static_cast<int>(pHit * 100);
     std::string blocker;
-    if (d <= 1.5 && h < static_cast<int>(pHit * 100) && isDefended(u.id, &blocker)) {
-      // The hit would have landed, but an HQ's point defense was on this contact.
-      events.push_back({tick, "blocked", u.id + " blocked by " + blocker});
-      if (u.type == UnitType::Missile) {
-        u.alive = false;
-        u.hp = 0;
-        events.push_back({tick, "expended", u.id});
+    if (wouldHit && isDefended(u.id, &blocker)) {
+      // Point defense needs a usable track on a red contact to shoot at it.
+      if (u.team != Team::Red || observedSnr(u) >= kLockSnr) {
+        events.push_back({tick, "blocked", u.id + " blocked by " + blocker});
+        if (u.type == UnitType::Missile) {
+          u.alive = false;
+          u.hp = 0;
+          events.push_back({tick, "expended", u.id});
+        }
+        continue;
       }
-      continue;
+      events.push_back({tick, "nolock", blocker + " had no firing solution on " + u.id});
     }
-    if (d <= 1.5 && h < static_cast<int>(pHit * 100)) {
-      tgt->hp -= (u.type == UnitType::Missile) ? 40 : 15;
+    if (wouldHit) {
+      // Aircraft are fragile: a fighter's hit does 50, a missile's 100.
+      tgt->hp -= airTarget ? (u.type == UnitType::Missile ? 100 : 50) : profile.damage;
       u.lastHitTick = tick;
       events.push_back({tick, "engage", u.id + " hit " + tgt->id});
       if (tgt->hp <= 0) {
@@ -705,6 +909,8 @@ std::string World::toJson(bool pretty) const {
       << "\"y\":" << u.y << ","
       << "\"px\":" << u.px << ","
       << "\"py\":" << u.py << ","
+      << "\"z\":" << u.z << ","
+      << "\"pz\":" << u.pz << ","
       << "\"hp\":" << u.hp << ","
       << "\"integrity\":" << u.integrity << ","
       << "\"jamRadius\":" << u.jamRadius << ","
@@ -713,6 +919,7 @@ std::string World::toJson(bool pretty) const {
       << "\"c0\":" << u.c0 << ",\"c1\":" << u.c1 << ",\"c2\":" << u.c2 << ","
       << "\"h0\":" << u.h0 << ",\"h1\":" << u.h1 << ",\"h2\":" << u.h2 << ","
       << "\"r0\":" << u.r0 << ",\"r1\":" << u.r1 << ",\"r2\":" << u.r2 << ",\"r3\":" << u.r3 << ","
+      << "\"a0\":" << u.a0 << ",\"a1\":" << u.a1 << ",\"a2\":" << u.a2 << ",\"a3\":" << u.a3 << ","
       << "\"stopTicks\":" << u.stopTicks << ","
       << "\"moved\":" << (u.moved ? 1 : 0) << ","
       << "\"seqTick\":" << u.seqTick << ","
@@ -722,6 +929,7 @@ std::string World::toJson(bool pretty) const {
       << "\"action\":" << jsonString(orderToString(u.order.action)) << ","
       << "\"tx\":" << u.order.tx << ","
       << "\"ty\":" << u.order.ty << ","
+      << "\"tz\":" << u.order.tz << ","
       << "\"targetId\":" << jsonString(u.order.targetId)
       << "}}";
     unitJson.push_back(o.str());
@@ -742,7 +950,10 @@ std::string World::toJson(bool pretty) const {
       << "\"y\":" << t.y << ","
       << "\"vx\":" << t.vx << ","
       << "\"vy\":" << t.vy << ","
+      << "\"z\":" << t.z << ","
+      << "\"vz\":" << t.vz << ","
       << "\"snr\":" << t.snr << ","
+      << "\"locked\":" << (t.locked ? "true" : "false") << ","
       << "\"threatScore\":" << t.threat.score << ","
       << "\"threatLabel\":" << jsonString(t.threat.label) << ","
       << "\"scorer\":" << jsonString(t.threat.scorer) << ","
@@ -780,6 +991,7 @@ std::string World::toJson(bool pretty) const {
       << sp << "\"tick\":" << tick << "," << nl
       << sp << "\"width\":" << width << "," << nl
       << sp << "\"height\":" << height << "," << nl
+      << sp << "\"ceiling\":" << kCeiling << "," << nl
       << sp << "\"units\":[" << joinComma(unitJson) << "]," << nl
       << sp << "\"tracks\":[" << joinComma(trackJson) << "]," << nl
       << sp << "\"events\":[" << joinComma(eventJson) << "]," << nl
@@ -812,6 +1024,16 @@ World World::fromJson(const std::string& json) {
       u.py = u.y;
       extractIntField(obj, "px", u.px);
       extractIntField(obj, "py", u.py);
+      // Worlds written before altitude existed: aircraft load at cruise level.
+      u.z = profileOf(u.type).cruise;
+      extractIntField(obj, "z", u.z);
+      u.z = clampi(u.z, 0, profileOf(u.type).ceiling);
+      u.pz = u.z;
+      extractIntField(obj, "pz", u.pz);
+      extractNumberField(obj, "a0", u.a0);
+      extractNumberField(obj, "a1", u.a1);
+      extractNumberField(obj, "a2", u.a2);
+      extractNumberField(obj, "a3", u.a3);
       extractIntField(obj, "lastHitTick", u.lastHitTick);
       extractNumberField(obj, "c0", u.c0);
       extractNumberField(obj, "c1", u.c1);
@@ -844,6 +1066,7 @@ World World::fromJson(const std::string& json) {
         orderFromString(action, u.order.action);
         extractIntField(orderObj, "tx", u.order.tx);
         extractIntField(orderObj, "ty", u.order.ty);
+        extractIntField(orderObj, "tz", u.order.tz);
         extractStringField(orderObj, "targetId", u.order.targetId);
       }
       w.units.push_back(u);

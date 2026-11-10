@@ -23,6 +23,7 @@ import random
 import shutil
 import sys
 
+import seqlab
 import simlab
 from scenarios import SCENARIOS
 
@@ -31,7 +32,7 @@ AGENT_TICKS = 12  # the agent eval plays a shorter game to keep tool calls reaso
 # Expected loss if the contact gets through, by class. Triage is by
 # score x severity, the same rule for every scorer. Contact class is taken
 # as known (classification is not what is being tested here).
-SEVERITY = {"missile": 40, "jet": 15, "jammer": 3}
+SEVERITY = {"missile": 40, "bomber": 35, "stealth": 20, "jet": 15, "drone": 8, "jammer": 3}
 
 p = argparse.ArgumentParser()
 p.add_argument("--rollouts", type=int, default=150, help="random rollouts (seeds from 200000)")
@@ -64,11 +65,19 @@ def by_score(key):
     def choose(world, _ctx):
         kind = kinds(world)
         best, best_v = None, 0.0
-        for t in world["tracks"]:
-            score = t["learnedScore"] if key == "learned" else t["heuristicScore"] if key == "heuristic" else simlab.v1_score(t["features"])
-            v = score * SEVERITY.get(kind.get(t["sourceUnitId"]), 0)
-            if v > best_v:
-                best, best_v = t["sourceUnitId"], v
+        # Point defense cannot shoot at a track that is too weak (no lock), so
+        # contacts it can shoot at come first. Same rule for every scorer.
+        for locked_only in (True, False):
+            for t in world["tracks"]:
+                if locked_only and not t.get("locked", True):
+                    continue
+                score = (t["learnedScore"] if key == "learned" else t["sequenceScore"] if key == "sequence"
+                         else t["heuristicScore"] if key == "heuristic" else simlab.v1_score(t["features"]))
+                v = score * SEVERITY.get(kind.get(t["sourceUnitId"]), 0)
+                if v > best_v:
+                    best, best_v = t["sourceUnitId"], v
+            if best:
+                break
         return best
     return choose
 
@@ -113,8 +122,11 @@ POLICIES = [
     ("v1", "Triage by original heuristic", by_score("v1")),
     ("heuristic", "Triage by heuristic that reads the target", by_score("heuristic")),
     ("learned", "Triage by learned model", by_score("learned")),
+    ("sequence", "Triage by sequence model (GRU)", by_score("sequence")),
     ("lookahead", "One-step lookahead (uses the simulator's future)", lookahead),
 ]
+if seqlab.load() is None:
+    POLICIES = [p for p in POLICIES if p[0] != "sequence"]
 
 
 def play(sim, probe, units, orders, choose, seed, ticks=TICKS):

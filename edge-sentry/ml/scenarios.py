@@ -41,6 +41,8 @@ def order(tick, uid, action, **kw):
     args = ["order", "--id", uid, "--action", action]
     if "to" in kw:
         args += ["--tx", kw["to"][0], "--ty", kw["to"][1]]
+    if "level" in kw:
+        args += ["--tz", kw["level"]]
     if "target" in kw:
         args += ["--target", kw["target"]]
     return (tick, args)
@@ -127,5 +129,36 @@ SCENARIOS = [
         "units": blue_post() + [unit("R-M1", "missile", "red", 9, 6)],
         "orders": [], "ticks": 8,
         "checks": [("never", "R-M1", "hostile", 0, 8)],
+    },
+    # --- 3D: altitude, aircraft types, terrain masking -------------------------
+    {
+        "name": "Stealth fighter attack run on headquarters",
+        "units": blue_post() + [unit("R-F1", "stealth", "red", 11, 6)],
+        "orders": [order(0, "R-F1", "launch", target="B-HQ")], "ticks": 12,
+        "checks": [("warned", "R-F1", 1)],
+    },
+    {
+        "name": "Bomber run on headquarters from high level",
+        "units": blue_post() + [unit("R-BMR1", "bomber", "red", 11, 2)],
+        "orders": [order(0, "R-BMR1", "launch", target="B-HQ")], "ticks": 16,
+        "checks": [("warned", "R-BMR1", 2)],
+    },
+    {
+        "name": "Jet drops to low level far away and holds there",
+        "units": blue_post() + [unit("R-JET1", "jet", "red", 10, 10)],
+        "orders": [order(1, "R-JET1", "altitude", level=1)], "ticks": 8,
+        "checks": [("never", "R-JET1", "hostile", 0, 8)],
+    },
+    {
+        "name": "Fighter orbits at long range",
+        "units": blue_post() + [unit("R-JET1", "jet", "red", 10, 1)],
+        "orders": [order(0, "R-JET1", "orbit")], "ticks": 10,
+        "checks": [("never", "R-JET1", "hostile", 0, 10)],
+    },
+    {
+        "name": "Drone comes in low behind cover to hit a sensor",
+        "units": default_units()[:4] + [unit("R-DRN1", "drone", "red", 3, 11)],
+        "orders": [order(0, "R-DRN1", "launch", target="B-S1")], "ticks": 14,
+        "checks": [("warned", "R-DRN1", 1)],
     },
 ]

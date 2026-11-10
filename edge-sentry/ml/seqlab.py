@@ -5,9 +5,9 @@ Standard library only, so evaluation runs without PyTorch. Training
 
 The model reads one contact's per-tick inputs in order and carries a hidden
 state from tick to tick. It sees only the first SEQ_INPUTS model inputs, the
-ones that describe the current tick. The hand-built history inputs the default
-model uses (ticks stopped, range closed over 3 ticks, lagged closing and
-heading) are left out on purpose: the question is whether a recurrent model
+ones that describe the current tick (altitude and climb or descent included). The hand-built history inputs the default
+model uses (ticks stopped, range closed and altitude lost over 3 ticks, lagged closing
+and heading) are left out on purpose: the question is whether a recurrent model
 can learn that history for itself.
 """
 import json
@@ -16,7 +16,7 @@ import os
 
 import simlab
 
-SEQ_INPUTS = 17  # must match kSequenceInputs in native/src/aiml_scorer.hpp
+SEQ_INPUTS = simlab.SEQUENCE_INPUTS  # kSequenceInputs in native/src/aiml_scorer.hpp, reported by `edge-sim inputs`
 INPUT_NAMES = simlab.MODEL_INPUTS[:SEQ_INPUTS]
 MODEL_PATH = os.path.join(simlab.HERE, "sequence.json")
 HEADER_PATH = os.path.join(simlab.ROOT, "native", "src", "sequence_weights.hpp")
