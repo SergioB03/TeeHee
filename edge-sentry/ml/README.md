@@ -51,6 +51,18 @@ python3 ml/evaluate.py     # standard library only
 python3 ml/outcome.py      # standard library only, about two minutes
 ```
 
+## Sequence model (PyTorch)
+
+`train_seq.py` trains a GRU with 16 hidden units on the same rollouts and splits. It reads one contact one tick at a time and sees only the first 17 inputs, the ones that describe the current tick. The hand-built history inputs (ticks stopped, range closed over 3 ticks, lagged closing and heading) are withheld, so any memory of the track has to be learned. Validation is used for early stopping and for the same two cut-off rules.
+
+`seqlab.py` holds a plain-Python forward pass and the exporter, so evaluation does not need PyTorch. The trainer refuses to write weights unless that forward pass reproduces PyTorch's scores. In edge-sim each contact's hidden state lives in the world file and advances once per tick.
+
+Result: the same held-out AUC as the default model with less feature engineering, and one fewer scripted scenario passed (it misses a missile fired from across the whole map until too late). See `RESULTS.md`.
+
+```bash
+python3 ml/train_seq.py    # needs torch; or run the "Train sequence model" workflow
+```
+
 ## Evaluation: prediction
 
 `evaluate.py` compares three scorers on identical simulator output: the learned model, the heuristic that reads the target, and the original heuristic. It reports AUC, precision, recall and F1 on the held-out rollouts, runs the 14 scripted scenarios in `scenarios.py`, and checks that the C++ scorer and the Python reference agree on every row. With `--check` it exits non-zero if a floor is missed, which is what CI runs.

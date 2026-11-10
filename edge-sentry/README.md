@@ -15,6 +15,7 @@ Simulation and wargame math only. No real RF jammer designs, seeker guidance, or
 | Scorer | AUC | AUC, jets and missiles | F1 at hostile | Scripted scenarios passed |
 | --- | --- | --- | --- | --- |
 | **Learned model**, observable inputs only | **0.978** | **0.949** | **0.90** | **13 of 14** |
+| Sequence model (PyTorch GRU), per-tick inputs only | 0.978 | 0.948 | 0.89 | 12 of 14 |
 | Hand-set heuristic that reads the contact's real target | 0.896 | 0.939 | 0.63 | 12 of 14 |
 | Original hand-set heuristic, observable inputs only | 0.799 | 0.603 | 0.09 | 9 of 14 |
 
@@ -30,6 +31,8 @@ Simulation and wargame math only. No real RF jammer designs, seeker guidance, or
 | One-step lookahead (uses the simulator's future) | 0.970 | 1.14 |
 
 Mission value is the average over every tick and blue asset of health × integrity. The learned model recovers 76% of the gain that lookahead gets over doing nothing.
+
+**Does a recurrent model need the hand-built history?** No. The sequence model is a 16-unit GRU trained with PyTorch that gets only the 17 inputs describing the current tick and has to remember the track itself. It matches the default model on held-out AUC (0.978 vs 0.978, 0.948 vs 0.949 on jets and missiles) and passes one fewer scripted scenario, so it is a tie on accuracy with less feature engineering, not an improvement. The default stays the smaller model; `--scorer sequence` switches to the GRU, and every track reports both scores.
 
 Where it falls short: the one scripted scenario it fails is a jet that parks beside HQ without firing, which the model reads as benign and a human would keep watching. It also needs a tick or two of motion before it can read intent, so it cannot call anything hostile at tick 0.
 
@@ -91,12 +94,12 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 62 CLI regression checks
+npm test               # 64 CLI regression checks
 npm run eval:model     # held-out metrics, 14 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
 ```
 
-Retraining needs numpy and scikit-learn: `python3 ml/train.py`, then rebuild.
+Retraining needs numpy and scikit-learn: `python3 ml/train.py`, then rebuild. The sequence model needs PyTorch: `python3 ml/train_seq.py`, or run the *Train sequence model* workflow, which trains in GitHub Actions and commits the weights.
 
 The agent's outcome eval (`evals/outcome.eval.ts`) seeds five scenarios, lets the agent run the HQ's defense for 12 ticks, and scores the result against no defense and against the learned-model policy. It needs a model login: `npx @grok/agent-sdk eval --dir . --tag outcome`.
 
@@ -106,6 +109,7 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds five scenarios, lets th
 - The scorer has two modes, `--scorer learned` (default) and `--scorer heuristic`, and every track reports both scores so they can be compared on identical worlds.
 - The decision log (`<world>.decisions.jsonl`) is append-only: every order, spawn and reset, accepted or refused, with who issued it, the stated reason, and the threat picture beforehand. Option values are parsed as plain text, so no reason or unit id can switch logging off.
 - The C++ model and the Python reference are checked against each other on every held-out row (they agree to within 1e-5).
+- The GRU runs in plain C++ with no ML runtime: weights are compiled in, and each contact's hidden state is saved in the world file and advanced exactly once per tick, however many times the world is read in between.
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
 - [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) records a code review of the first version: five bugs found, fixed, and covered by regression tests.
