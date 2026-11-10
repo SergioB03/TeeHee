@@ -92,6 +92,8 @@ World World::defaultScenario() {
     u.team = team;
     u.x = x;
     u.y = y;
+    u.px = x;
+    u.py = y;
     if (type == UnitType::Jammer) u.jamRadius = jam > 0 ? jam : 3;
     w.units.push_back(u);
   };
@@ -117,6 +119,8 @@ World World::defaultScenario() {
   w.scoreAllTracks();
   return w;
 }
+
+ScorerKind World::activeScorer = ScorerKind::Learned;
 
 void World::reset() { *this = defaultScenario(); }
 
@@ -162,6 +166,8 @@ bool World::spawn(UnitType type, Team team, int x, int y, std::string* err) {
   u.team = team;
   u.x = x;
   u.y = y;
+  u.px = x;
+  u.py = y;
   if (type == UnitType::Jammer) u.jamRadius = 3;
   units.push_back(u);
   events.push_back({tick, "spawn", u.id + " " + unitTypeToString(type)});
@@ -227,8 +233,12 @@ void World::scoreAllTracks() {
     t.sourceUnitId = u.id;
     t.x = u.x;
     t.y = u.y;
-    t.vx = (u.order.action == OrderAction::Move) ? 1 : 0;
-    t.vy = 0;
+    // Observed velocity: displacement over the last tick.
+    t.vx = u.x - u.px;
+    t.vy = u.y - u.py;
+    // The heuristic keeps its original order-based speed input so the
+    // baseline scores are unchanged.
+    const double orderSpeed = (u.order.action == OrderAction::Move) ? 1.0 : 0.0;
 
     // SNR degraded by jam fields near blue sensors looking at this contact
     double bestSnr = 0.15;
@@ -250,7 +260,7 @@ void World::scoreAllTracks() {
     const double prox = nearestBlue > 12 ? 0 : 1.0 - (nearestBlue / 12.0);
 
     TrackFeatures f;
-    f.speed = std::abs(t.vx) + std::abs(t.vy);
+    f.speed = orderSpeed;
     if (u.type == UnitType::Jet) f.speed = std::max(f.speed, 2.0);
     if (u.type == UnitType::Missile) f.speed = std::max(f.speed, 3.0);
     f.snr = t.snr;
@@ -273,13 +283,68 @@ void World::scoreAllTracks() {
     }
     f.closingOnBlue = closing ? 1.0 : 0.0;
 
-    t.threat = scoreTrack(f);
+    // Observable inputs for the learned model. Nothing below reads the
+    // contact's order or target; it is all kinematics, emissions and effects.
+    ObservedFeatures o;
+    const double speedNow = std::sqrt(t.vx * t.vx + t.vy * t.vy);
+    o.speed = speedNow / 3.0;
+    o.snr = t.snr;
+    o.emitter = (u.type == UnitType::Jammer) ? 1.0 : 0.0;
+    o.proximity = prox;
+    o.airborne = f.altitudeHint;
+    // Range rate and bearing are taken against every blue asset and the
+    // strongest is kept: the asset a contact is flying at is often not the
+    // one it happens to be nearest to.
+    for (const auto& b : units) {
+      if (!b.alive || b.team != Team::Blue) continue;
+      const double now = dist(b.x, b.y, u.x, u.y);
+      const double before = dist(b.x, b.y, u.px, u.py);
+      o.closing = std::max(o.closing, (before - now) / 2.0);
+      // Time to intercept: at this range rate, how soon does it arrive?
+      if (before - now > 0) {
+        const double ticksOut = now / (before - now);
+        o.intercept = std::max(o.intercept, 1.0 - ticksOut / 10.0);
+      }
+      if (speedNow <= 0) continue;
+      // Bearing uses the position before the step so arriving on top of an
+      // asset still counts as heading straight at it.
+      double bearing = 0;
+      if (before > 0) {
+        const double toward = t.vx * (b.x - u.px) + t.vy * (b.y - u.py);
+        bearing = toward / (speedNow * before);
+      }
+      if (bearing > o.heading) {
+        o.heading = bearing;
+        o.aimRange = now > 12 ? 0 : 1.0 - now / 12.0;
+      }
+    }
+    if (u.type == UnitType::Jammer && u.jamRadius > 0) {
+      for (const auto& b : units) {
+        if (!b.alive || b.team != Team::Blue) continue;
+        if (!(b.type == UnitType::Sensor || b.type == UnitType::HQ || b.type == UnitType::Relay)) continue;
+        const double d = dist(b.x, b.y, u.x, u.y);
+        if (d < u.jamRadius) {
+          o.blueInField = std::max(o.blueInField, 1.0 - d / static_cast<double>(u.jamRadius));
+        }
+      }
+    } else {
+      o.ewCover = jamFieldAt(u.x, u.y, Team::Blue);
+    }
+    o.recentFire = (tick - u.lastHitTick <= 3) ? 1.0 : 0.0;
+
+    t.threat = scoreTrack(f, o, activeScorer);
     tracks.push_back(t);
   }
 }
 
 void World::tickOnce() {
   ++tick;
+
+  // Remember where everything was so tracks carry an observed velocity.
+  for (auto& u : units) {
+    u.px = u.x;
+    u.py = u.y;
+  }
 
   // Apply orders / movement
   for (auto& u : units) {
@@ -333,6 +398,7 @@ void World::tickOnce() {
     const int h = static_cast<int>(u.id.size() * 17 + tgt->id.size() * 13 + tick * 31) % 100;
     if (d <= 1.5 && h < static_cast<int>(pHit * 100)) {
       tgt->hp -= (u.type == UnitType::Missile) ? 40 : 15;
+      u.lastHitTick = tick;
       events.push_back({tick, "engage", u.id + " hit " + tgt->id});
       if (tgt->hp <= 0) {
         tgt->alive = false;
@@ -368,10 +434,13 @@ std::string World::toJson(bool pretty) const {
       << "\"team\":" << jsonString(teamToString(u.team)) << ","
       << "\"x\":" << u.x << ","
       << "\"y\":" << u.y << ","
+      << "\"px\":" << u.px << ","
+      << "\"py\":" << u.py << ","
       << "\"hp\":" << u.hp << ","
       << "\"integrity\":" << u.integrity << ","
       << "\"jamRadius\":" << u.jamRadius << ","
       << "\"targetId\":" << jsonString(u.targetId) << ","
+      << "\"lastHitTick\":" << u.lastHitTick << ","
       << "\"alive\":" << (u.alive ? "true" : "false") << ","
       << "\"order\":{"
       << "\"action\":" << jsonString(orderToString(u.order.action)) << ","
@@ -387,6 +456,8 @@ std::string World::toJson(bool pretty) const {
     auto probs = classProbsFromScore(t.threat.score);
     std::vector<std::string> feats;
     for (double f : t.threat.features) feats.push_back(std::to_string(f));
+    std::vector<std::string> observed;
+    for (double f : t.threat.observed) observed.push_back(std::to_string(f));
     std::ostringstream o;
     o << "{"
       << "\"id\":" << jsonString(t.id) << ","
@@ -398,12 +469,18 @@ std::string World::toJson(bool pretty) const {
       << "\"snr\":" << t.snr << ","
       << "\"threatScore\":" << t.threat.score << ","
       << "\"threatLabel\":" << jsonString(t.threat.label) << ","
+      << "\"scorer\":" << jsonString(t.threat.scorer) << ","
+      << "\"watchAt\":" << t.threat.watchAt << ","
+      << "\"hostileAt\":" << t.threat.hostileAt << ","
+      << "\"heuristicScore\":" << std::to_string(t.threat.heuristicScore) << ","
+      << "\"learnedScore\":" << std::to_string(t.threat.learnedScore) << ","
       << "\"classProbs\":{"
       << "\"benign\":" << probs.benign << ","
       << "\"watch\":" << probs.watch << ","
       << "\"hostile\":" << probs.hostile
       << "},"
-      << "\"features\":[" << joinComma(feats) << "]"
+      << "\"features\":[" << joinComma(feats) << "],"
+      << "\"observed\":[" << joinComma(observed) << "]"
       << "}";
     trackJson.push_back(o.str());
   }
@@ -453,6 +530,12 @@ World World::fromJson(const std::string& json) {
       teamFromString(team, u.team);
       extractIntField(obj, "x", u.x);
       extractIntField(obj, "y", u.y);
+      // Worlds written before px/py existed load as "not moving".
+      u.px = u.x;
+      u.py = u.y;
+      extractIntField(obj, "px", u.px);
+      extractIntField(obj, "py", u.py);
+      extractIntField(obj, "lastHitTick", u.lastHitTick);
       extractNumberField(obj, "hp", u.hp);
       extractNumberField(obj, "integrity", u.integrity);
       extractIntField(obj, "jamRadius", u.jamRadius);

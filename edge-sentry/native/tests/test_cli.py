@@ -19,9 +19,10 @@ WORLD = os.path.join(tempfile.mkdtemp(prefix="edge-sim-test-"), "world.json")
 failures = []
 
 
-def sim(*args):
+def sim(*args, scorer=None):
     """Run one CLI command. Returns (exit_code, parsed_json_or_None)."""
-    p = subprocess.run([SIM, "--world", WORLD, *args], capture_output=True, text=True)
+    extra = ["--scorer", scorer] if scorer else []
+    p = subprocess.run([SIM, "--world", WORLD, *extra, *args], capture_output=True, text=True)
     try:
         return p.returncode, json.loads(p.stdout)
     except ValueError:
@@ -53,14 +54,39 @@ check("default scenario has 7 units and 3 red tracks",
 # --- default EW + AIML labels (REVIEW_FINDINGS #6 / #7) -----------------------
 relay = unit(out["world"], "B-R1")
 check("default jammer degrades B-R1 integrity", relay["integrity"] < 0.95)
-tracks = {t["sourceUnitId"]: t for t in out["world"]["tracks"]}
-check("homing missile track is hostile", tracks["R-MSL1"]["threatLabel"] == "hostile")
-check("idle jet track is not hostile", tracks["R-JET1"]["threatLabel"] != "hostile")
-check("jammer track is at least watch", tracks["R-J1"]["threatLabel"] in ("watch", "hostile"))
-check("AIML feature vector includes closingOnBlue",
+# The heuristic reads the missile's real target, so it can call it at tick 0.
+code, heur = sim("status", scorer="heuristic")
+tracks = {t["sourceUnitId"]: t for t in heur["world"]["tracks"]}
+check("heuristic: homing missile track is hostile", tracks["R-MSL1"]["threatLabel"] == "hostile")
+check("heuristic: idle jet track is not hostile", tracks["R-JET1"]["threatLabel"] != "hostile")
+check("heuristic: jammer track is at least watch", tracks["R-J1"]["threatLabel"] in ("watch", "hostile"))
+check("heuristic feature vector includes closingOnBlue",
       len(tracks["R-MSL1"].get("features") or []) == 6 and tracks["R-MSL1"]["features"][-1] == 1.0)
+check("heuristic keeps its fixed 0.33 / 0.66 cut-offs",
+      tracks["R-MSL1"]["scorer"] == "heuristic" and tracks["R-MSL1"]["hostileAt"] == 0.66)
 
-code, out = sim("tick", "--n", "6")
+# --- learned scorer (default): observable inputs only -------------------------
+tracks = {t["sourceUnitId"]: t for t in out["world"]["tracks"]}
+check("learned scorer is the default", all(t["scorer"] == "learned" for t in tracks.values()))
+check("learned: observed vector has 12 values in 0..1",
+      all(len(t["observed"]) == 12 and all(0 <= v <= 1 for v in t["observed"]) for t in tracks.values()))
+check("learned: both scores are reported for comparison",
+      all("heuristicScore" in t and "learnedScore" in t for t in tracks.values()))
+check("learned: jammer covering the relay is at least watch", tracks["R-J1"]["threatLabel"] in ("watch", "hostile"))
+check("learned: idle jet is not hostile", tracks["R-JET1"]["threatLabel"] != "hostile")
+check("learned: nothing has moved yet, so the missile is not yet hostile",
+      tracks["R-MSL1"]["threatLabel"] != "hostile" and tracks["R-MSL1"]["vx"] == 0)
+
+code, out = sim("tick", "--n", "3")
+code, out = sim("status")  # a separate process: velocity must survive the reload
+msl = next(t for t in out["world"]["tracks"] if t["sourceUnitId"] == "R-MSL1")
+check("observed velocity persists across CLI calls", (msl["vx"], msl["vy"]) != (0, 0))
+check("learned: homing missile is hostile by tick 3, three ticks before impact", msl["threatLabel"] == "hostile")
+jet = next(t for t in out["world"]["tracks"] if t["sourceUnitId"] == "R-JET1")
+check("learned: idle jet is still not hostile at tick 3", jet["threatLabel"] != "hostile")
+rejected("unknown --scorer is rejected", "--scorer", "magic", "status", contains="--scorer")
+
+code, out = sim("tick", "--n", "3")
 check("missile reaches and hits B-HQ by tick 6", unit(out["world"], "B-HQ")["hp"] == 60)
 
 # --- event log survives across separate CLI calls -----------------------------

@@ -8,7 +8,9 @@
     "dev": "agent-sdk dev",
     "build:native": "cmake -S native -B native/build -DCMAKE_CXX_COMPILER=g++ && cmake --build native/build -j",
     "sim": "native/build/edge-sim",
-    "web": "bash web/run.sh"
+    "web": "bash web/run.sh",
+    "test": "python3 native/tests/test_cli.py",
+    "eval:model": "python3 ml/evaluate.py --check"
   },
   "dependencies": {
     "@grok/agent-sdk": "^0.6.0",

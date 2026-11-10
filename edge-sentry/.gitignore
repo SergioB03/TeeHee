@@ -6,3 +6,5 @@ memory
 native/build
 *.o
 world.json
+__pycache__
+*.pyc

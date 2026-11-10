@@ -89,6 +89,8 @@ Fix: `runSim` catches the rejection and parses the captured stdout. Verified by 
 
 Added `closingOnBlue` feature + reweighted scorer so a homing missile can reach `hostile` without sitting in a jam field. `jamFieldAt` is team-aware (only opposing jammers). See `native/src/aiml_scorer.cpp` and `scoreAllTracks()`.
 
+Follow-up: `closingOnBlue` is set from the contact's actual `targetId`, so the heuristic is reading ground truth a sensor would not have. It is kept as `--scorer heuristic` for comparison. The default scorer is now a logistic model trained on simulator rollouts that uses observable inputs only (motion, emissions, effects on blue). On 200 held-out scenarios it scores AUC 0.961 against 0.896 for this heuristic, and passes 14 of 14 scripted scenarios against 12. See `ml/README.md` and `ml/RESULTS.md`.
+
 ### 7. Default scenario never exercises jamming — fixed
 
 Moved `R-J1` to `(5,6)` and apply an integrity pass on scenario load so `B-R1` starts under the jam cone.
@@ -104,7 +106,7 @@ Moved `R-J1` to `(5,6)` and apply an integrity pass on scenario load so `B-R1` s
 
 ## Regression tests
 
-`native/tests/test_cli.py` (Python standard library only) covers the fixes above: 21 checks, all passing on this branch. Against `8f5f284`, 17 of the 21 fail (the last two are knock-on effects of earlier invalid orders having been accepted).
+`native/tests/test_cli.py` (Python standard library only) covers the fixes above and the scorer behavior. The original 21 checks all passed on the fix branch; against `8f5f284`, 17 of the 21 failed (the last two as knock-on effects of earlier invalid orders having been accepted). CI now runs the full file on every push, along with the model evaluation.
 
 ```bash
 npm run build:native

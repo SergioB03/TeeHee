@@ -16,7 +16,9 @@ void usage() {
       << "  edge-sim --world <path> tick [--n N]\n"
       << "  edge-sim --world <path> score\n"
       << "  edge-sim --world <path> spawn --type <sensor|relay|jammer|jet|missile|hq> --team <blue|red> --x N --y N\n"
-      << "  edge-sim --world <path> order --id ID --action <move|jam|launch|cease> [--tx N --ty N] [--target ID]\n";
+      << "  edge-sim --world <path> order --id ID --action <move|jam|launch|cease> [--tx N --ty N] [--target ID]\n"
+      << "Options:\n"
+      << "  --scorer <learned|heuristic>   which threat scorer fills threatScore (default learned)\n";
 }
 
 std::string readFile(const std::string& path) {
@@ -87,6 +89,17 @@ int main(int argc, char** argv) {
   if (worldPath.empty()) {
     std::cerr << "{\"error\":\"missing --world path\"}\n";
     return 2;
+  }
+
+  // Must be set before the world loads: loading rescores every track.
+  if (hasFlag(args, "--scorer")) {
+    const std::string scorer = argValue(args, "--scorer");
+    if (scorer == "learned") World::activeScorer = ScorerKind::Learned;
+    else if (scorer == "heuristic") World::activeScorer = ScorerKind::Heuristic;
+    else {
+      std::cout << "{\"ok\":false,\"error\":\"bad --scorer (expected learned or heuristic)\"}\n";
+      return 1;
+    }
   }
 
   std::string cmd;

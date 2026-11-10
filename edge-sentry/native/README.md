@@ -32,8 +32,11 @@ python3 tests/test_cli.py   # CLI regression checks, stdlib only
 
 ## AIML hook
 
-`src/aiml_scorer.cpp` maps track features → `{benign, watch, hostile}`.
+`src/aiml_scorer.cpp` maps each track to `{benign, watch, hostile}` with one of two scorers:
 
-Feature vector (6): speed, snr, jamPressure, proximityBlue, altitudeHint, closingOnBlue.
+- `--scorer learned` (default): logistic regression over 12 observed features, trained on simulator rollouts. Weights are generated into `src/model_weights.hpp` by `ml/train.py`. See `../ml/README.md`.
+- `--scorer heuristic`: the hand-weighted baseline over 6 features (speed, snr, jamPressure, proximityBlue, altitudeHint, closingOnBlue).
 
-v1 uses a weighted heuristic. Later: dump `features` + labels, train a small classifier, swap the scorer body without changing the agent tools.
+Every track reports `threatScore` and `threatLabel` from the active scorer, plus `learnedScore`, `heuristicScore`, the `observed` and `features` input vectors, and the `watchAt` / `hostileAt` cut-offs in use.
+
+Units carry `px` / `py` (position one tick ago) so tracks have a real observed velocity that survives between CLI calls.

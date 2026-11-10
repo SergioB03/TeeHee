@@ -4,9 +4,16 @@
 #include <vector>
 
 // AIML = AI/ML track threat scoring.
-// v1: weighted heuristic on hand-crafted features (learnable later).
-// Swap scoreTrack() internals for a trained model without changing the sim API.
+//
+// Two scorers share one interface:
+//   - heuristic: hand-set weights over TrackFeatures (the original v1).
+//   - learned:   logistic regression trained on simulator rollouts (see ml/),
+//                weights generated into model_weights.hpp.
+// The learned scorer is the default. `edge-sim --scorer heuristic` selects the
+// baseline so the two can be compared on identical worlds.
 
+// Inputs to the heuristic. closingOnBlue reads the contact's actual target
+// assignment, which is ground truth the sim knows but a real sensor would not.
 struct TrackFeatures {
   double speed = 0;           // cells per tick
   double snr = 0;             // sensor quality 0..1
@@ -16,13 +23,43 @@ struct TrackFeatures {
   double closingOnBlue = 0;   // 0..1 actively targeting / homing on blue
 };
 
-struct ThreatScore {
-  double score = 0;          // 0..1
-  std::string label;         // benign | watch | hostile
-  std::vector<double> features; // exported for later training dumps
+// Inputs to the learned model. Everything here is observable from the blue
+// side: kinematics, emissions, and effects on blue assets. Nothing is read
+// from the contact's orders or target. All values are scaled to 0..1.
+struct ObservedFeatures {
+  double speed = 0;        // observed displacement over the last tick
+  double snr = 0;          // best blue sensor signal quality on the contact
+  double emitter = 0;      // 1 if the contact is radiating as a jammer
+  double proximity = 0;    // closeness to the nearest blue asset
+  double airborne = 0;     // altitude prior for the contact class
+  double closing = 0;      // fastest range rate toward any blue asset
+  double heading = 0;      // how directly its motion points at a blue asset
+  double aimRange = 0;     // closeness of the asset it is pointed at (0 if none)
+  double blueInField = 0;  // strongest jam pressure it puts on a blue asset
+  double ewCover = 0;      // red jam field strength at the contact
+  double recentFire = 0;   // 1 if it damaged a blue asset in the last 3 ticks
+  double intercept = 0;    // 1 - (ticks until it reaches a blue asset at its current range rate) / 10
 };
 
-ThreatScore scoreTrack(const TrackFeatures& f);
+enum class ScorerKind { Learned, Heuristic };
+
+struct ThreatScore {
+  double score = 0;              // 0..1, from the active scorer
+  std::string label;             // benign | watch | hostile
+  std::string scorer;            // "learned" | "heuristic"
+  double watchAt = 0.33;         // label thresholds for the active scorer
+  double hostileAt = 0.66;
+  double heuristicScore = 0;     // always computed, for comparison
+  double learnedScore = 0;       // always computed, for comparison
+  std::vector<double> features;  // heuristic inputs (6)
+  std::vector<double> observed;  // learned-model inputs (12)
+};
+
+double heuristicScore(const TrackFeatures& f);
+double learnedScore(const ObservedFeatures& o);
+std::string labelForScore(double score, ScorerKind kind);
+
+ThreatScore scoreTrack(const TrackFeatures& f, const ObservedFeatures& o, ScorerKind kind);
 
 // Softmax-style class probs for learning demos / eval dumps.
 struct ClassProbs {

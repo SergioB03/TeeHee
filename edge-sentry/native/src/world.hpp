@@ -22,10 +22,13 @@ struct Unit {
   Team team = Team::Blue;
   int x = 0;
   int y = 0;
+  int px = 0;               // position one tick ago (for observed velocity)
+  int py = 0;
   double hp = 100;
   double integrity = 1.0;   // sensor quality
   int jamRadius = 0;        // for jammers
   std::string targetId;     // missiles / jets
+  int lastHitTick = -1000;  // tick this unit last damaged another unit
   Order order;
   bool alive = true;
 };
@@ -55,6 +58,10 @@ struct World {
   std::vector<Track> tracks;
   std::vector<SimEvent> events;
   std::vector<int> cover; // width*height, 0/1
+
+  // Which scorer fills threatScore/threatLabel. Process-wide so it applies to
+  // worlds scored while loading; set from `--scorer` before any world exists.
+  static ScorerKind activeScorer;
 
   static World defaultScenario();
   static World fromJson(const std::string& json);

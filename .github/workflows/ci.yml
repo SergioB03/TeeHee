@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: edge-sentry
+
+jobs:
+  simulator:
+    name: Simulator, model and web console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build edge-sim
+        run: npm run build:native
+      - name: CLI regression tests
+        run: npm test
+      - name: Model evaluation (held-out metrics, scenarios, C++/Python parity)
+        run: npm run eval:model
+      - name: Results file is up to date
+        run: git diff --exit-code -- ml/RESULTS.md
+      - name: Web console smoke test
+        run: |
+          PORT=3100 node web/server.mjs &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:3100/api/state >/dev/null && break; sleep 0.5; done
+          curl -sf http://127.0.0.1:3100/ | grep -q "edge-sentry console"
+          curl -sf -X POST -H 'content-type: application/json' -d '{"n":3}' http://127.0.0.1:3100/api/tick | grep -q '"ok":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"n":999}' http://127.0.0.1:3100/api/tick)" = 400
+
+  typecheck:
+    name: TypeScript check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: edge-sentry/package-lock.json
+      - run: npm ci
+      - run: npm run check

@@ -7,7 +7,9 @@ export default defineTool({
   description: prompt`
     Re-run the AIML (AI/ML) track threat scorer on current contacts.
     Returns threatScore, threatLabel (benign|watch|hostile), classProbs, and features.
-    v1 is a weighted heuristic; the feature vector is the hook for a trained model later.
+    threatScore comes from a trained model: the probability that the contact harms a blue
+    asset within 5 ticks, from observable motion and emissions only. heuristicScore is the
+    older hand-weighted score, reported alongside for comparison.
   `,
   inputSchema: z.object({}),
   effect: "read",
@@ -20,7 +22,7 @@ export default defineTool({
       ok: true,
       tick: result.world?.tick,
       tracks: result.world?.tracks,
-      note: "AIML v1 = heuristic head (speed,snr,jam,prox,alt,closingOnBlue); swap aiml_scorer.cpp later.",
+      note: "threatScore = trained logistic model on observed features (see ml/RESULTS.md); heuristicScore = hand-weighted baseline.",
     };
   },
 });

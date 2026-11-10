@@ -232,7 +232,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </details>
 
-  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer, JT jet, MS missile. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order and a red line is an attack. Threat scores come from the simulator's scorer: 0.33 and above reads as watch, 0.66 and above as hostile.</p>
+  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer, JT jet, MS missile. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order and a red line is an attack. Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
 </div>
 
 <div class="clock"><div>
@@ -473,7 +473,7 @@ function renderLists() {
       continue;
     }
     const mid = html("div", { className: "pair" }, row);
-    mid.appendChild(meter(t.threatLabel, t.threatScore, [0.33, 0.66]));
+    mid.appendChild(meter(t.threatLabel, t.threatScore, [t.watchAt ?? 0.33, t.hostileAt ?? 0.66]));
     html("small", { textContent: `${KIND[u.type]}, threat ${t.threatScore.toFixed(2)}, signal ${t.snr.toFixed(2)}` }, mid);
     html("span", { className: "tag " + t.threatLabel, textContent: t.threatLabel }, row);
   }

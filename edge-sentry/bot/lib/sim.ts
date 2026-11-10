@@ -39,12 +39,20 @@ export type SimTrack = {
   snr: number;
   threatScore: number;
   threatLabel: string;
+  /** Which scorer produced threatScore: the trained model (default) or the hand-set baseline. */
+  scorer?: "learned" | "heuristic";
+  watchAt?: number;
+  hostileAt?: number;
+  heuristicScore?: number;
+  learnedScore?: number;
   classProbs: {
     benign: number;
     watch: number;
     hostile: number;
   };
   features: number[];
+  /** Inputs to the learned model: observable kinematics, emissions and effects. */
+  observed?: number[];
 };
 
 export type SimEvent = {

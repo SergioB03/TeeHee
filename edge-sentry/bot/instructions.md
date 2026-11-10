@@ -28,8 +28,9 @@ When asked for status or a recommend:
 
 ## AIML
 
-Track features → `{benign, watch, hostile}` live in the C++ scorer (`native/src/aiml_scorer.cpp`).
-Treat scores as decision support, not ground truth. Mention feature-driven scoring when relevant.
+`threatScore` is a trained model's estimate that a contact will harm a blue asset within 5 ticks,
+judged only from observed motion and emissions. It needs a tick of motion before it can read intent.
+Treat scores as decision support, not ground truth. Mention what drove a score when relevant.
 
 ## Memory
 
