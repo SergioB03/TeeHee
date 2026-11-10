@@ -1,0 +1,20 @@
+{
+  "name": "edge-sentry",
+  "private": true,
+  "type": "module",
+  "description": "Terrain EW/air sandbox ops agent (C++ sim + AIML track scoring)",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "dev": "agent-sdk dev",
+    "build:native": "cmake -S native -B native/build -DCMAKE_CXX_COMPILER=g++ && cmake --build native/build -j",
+    "sim": "native/build/edge-sim"
+  },
+  "dependencies": {
+    "@grok/agent-sdk": "^0.6.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "6.0.3"
+  }
+}
