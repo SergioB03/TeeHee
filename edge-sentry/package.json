@@ -7,7 +7,8 @@
     "check": "tsc --noEmit",
     "dev": "agent-sdk dev",
     "build:native": "cmake -S native -B native/build -DCMAKE_CXX_COMPILER=g++ && cmake --build native/build -j",
-    "sim": "native/build/edge-sim"
+    "sim": "native/build/edge-sim",
+    "web": "bash web/run.sh"
   },
   "dependencies": {
     "@grok/agent-sdk": "^0.6.0",

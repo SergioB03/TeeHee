@@ -18,12 +18,24 @@ npx @grok/agent-sdk dev
 # open http://127.0.0.1:3000/playground
 ```
 
+## Phone console
+
+A phone-sized web page for driving the simulator by hand: tap units on the map, give move / jam / launch / cease orders, advance ticks, add units, and read threat scores and the event log. It calls the same `edge-sim` binary as the agent tools. No model login and no `npm install` needed (the server uses Node built-ins only).
+
+```bash
+npm run web          # builds edge-sim if needed, then serves on port 3100
+# open http://localhost:3100
+```
+
+On Replit: import this repo and press Run. The root `.replit` file runs the same script and exposes the port. The world is shared by everyone who has the page open and lives in a temp file, so it resets when the server restarts.
+
 ## Layout
 
 | Path | Role |
 | --- | --- |
 | `bot/` | Agent instructions + tools |
 | `native/` | C++ sim + `aiml_scorer` |
+| `web/` | Phone console (`server.mjs`, `index.html`, `run.sh`) |
 | `evals/` | Smoke eval |
 
 ## Later detail (roadmap)
