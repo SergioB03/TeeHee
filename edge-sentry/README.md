@@ -4,7 +4,7 @@ A small 3D air and electronic-warfare sandbox with trained threat models, an LLM
 
 **Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (best on a phone; the sandbox is shared, so press Reset scenario to start clean)
 
-![Phone console: the model flags a missile hostile, the HQ's point defense is put on it, and the hit is blocked](docs/demo.gif)
+![Phone console, 3D view: playing blue, the stealth fighter is sent after a bomber and point defense is put on a missile while red attacks at different altitudes](docs/demo.gif)
 
 Blue sensors watch red contacts on a 12×12 map with six altitude levels. Jets, stealth fighters, bombers, drones and missiles each fly differently: speed, climb rate, ceiling, how visible they are to sensors, and how low they must come to hit. Low flyers hide behind terrain, and point defense needs a usable track to stop anything. The question the project answers each tick: **which contacts are about to hurt us, and which one do we deal with first?** A C++ simulator produces the world, a small neural network trained on simulator rollouts scores every contact, and an agent (or you, from your phone) reads the picture and issues orders. Every order is written to a decision log with the threat picture it was made on.
 
@@ -104,7 +104,7 @@ npm run eval:outcome   # triage policies compared on outcomes (quick version)
 
 Retraining needs numpy and scikit-learn: `python3 ml/train.py`, then rebuild. The sequence model needs PyTorch: `python3 ml/train_seq.py`, or run the *Train sequence model* workflow, which trains in GitHub Actions and commits the weights.
 
-The agent's outcome eval (`evals/outcome.eval.ts`) seeds five scenarios, lets the agent run the HQ's defense for 12 ticks, and scores the result against no defense and against the learned-model policy. It needs a model login: `npx @grok/agent-sdk eval --dir . --tag outcome`.
+The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets the agent run the HQ's defense for 12 ticks, and scores the result against no defense and against the learned-model policy. It needs a model login: `npx @grok/agent-sdk eval --dir . --tag outcome`.
 
 ## Engineering notes
 
