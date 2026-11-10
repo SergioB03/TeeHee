@@ -39,7 +39,7 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"n":999}' http://127.0.0.1:3100/api/tick)" = 400
 
   typecheck:
-    name: TypeScript check
+    name: TypeScript and agent project
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,3 +50,16 @@ jobs:
           cache-dependency-path: edge-sentry/package-lock.json
       - run: npm ci
       - run: npm run check
+      - name: No known vulnerabilities in dependencies
+        run: npm audit --audit-level=moderate
+      - name: Agent project loads (no model login needed)
+        run: |
+          npm run build:native
+          npx agent-sdk validate --dir .
+          npx agent-sdk eval --dir . --list
+      - name: Agent tools run against the simulator (no model login needed)
+        run: |
+          npx agent-sdk tool call map_status --dir . --input '{"reset":true}'
+          npx agent-sdk tool call issue_order --dir . --input '{"id":"B-HQ","action":"defend","target":"R-MSL1","reason":"ci smoke"}'
+          npx agent-sdk tool call run_tick --dir . --input '{"n":2}'
+          npx agent-sdk tool call decision_log --dir . --input '{"n":5}'
