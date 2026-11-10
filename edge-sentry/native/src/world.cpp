@@ -8,6 +8,32 @@
 namespace {
 int clampi(int v, int lo, int hi) { return std::max(lo, std::min(hi, v)); }
 
+// Hidden state is written with enough digits that reloading it between CLI
+// calls does not drift from an in-process run.
+std::string joinNumbers(const std::vector<double>& values) {
+  std::ostringstream o;
+  o.precision(12);
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i) o << ",";
+    o << values[i];
+  }
+  return o.str();
+}
+
+std::vector<double> parseNumbers(const std::string& body) {
+  std::vector<double> out;
+  std::stringstream in(body);
+  std::string item;
+  while (std::getline(in, item, ',')) {
+    try {
+      out.push_back(std::stod(item));
+    } catch (...) {
+      // skip anything that is not a number
+    }
+  }
+  return out;
+}
+
 std::string nextId(const std::string& prefix, const std::vector<Unit>& units) {
   int n = static_cast<int>(units.size()) + 1;
   return prefix + std::to_string(n);
@@ -452,7 +478,7 @@ void World::recordHistory() {
 
 void World::scoreAllTracks() {
   tracks.clear();
-  for (const auto& u : units) {
+  for (auto& u : units) {
     if (!u.alive) continue;
     if (u.team != Team::Red) continue; // blue sensors track red contacts in v1
 
@@ -554,7 +580,15 @@ void World::scoreAllTracks() {
         u.h2,
     };
 
-    t.threat = scoreTrack(f, inputs, activeScorer);
+    // The sequence model sees each tick exactly once: advance its hidden
+    // state the first time this contact is scored on a new tick, and reuse it
+    // for any later rescoring within the same tick (orders, status).
+    if (u.seqTick != tick) {
+      sequenceStep(std::vector<double>(inputs.begin(), inputs.begin() + kSequenceInputs), u.seqHidden);
+      u.seqTick = tick;
+    }
+
+    t.threat = scoreTrack(f, inputs, u.seqHidden, activeScorer);
     tracks.push_back(t);
   }
 }
@@ -681,6 +715,8 @@ std::string World::toJson(bool pretty) const {
       << "\"r0\":" << u.r0 << ",\"r1\":" << u.r1 << ",\"r2\":" << u.r2 << ",\"r3\":" << u.r3 << ","
       << "\"stopTicks\":" << u.stopTicks << ","
       << "\"moved\":" << (u.moved ? 1 : 0) << ","
+      << "\"seqTick\":" << u.seqTick << ","
+      << "\"seqHidden\":[" << joinNumbers(u.seqHidden) << "],"
       << "\"alive\":" << (u.alive ? "true" : "false") << ","
       << "\"order\":{"
       << "\"action\":" << jsonString(orderToString(u.order.action)) << ","
@@ -714,6 +750,7 @@ std::string World::toJson(bool pretty) const {
       << "\"hostileAt\":" << t.threat.hostileAt << ","
       << "\"heuristicScore\":" << std::to_string(t.threat.heuristicScore) << ","
       << "\"learnedScore\":" << std::to_string(t.threat.learnedScore) << ","
+      << "\"sequenceScore\":" << std::to_string(t.threat.sequenceScore) << ","
       << "\"classProbs\":{"
       << "\"benign\":" << probs.benign << ","
       << "\"watch\":" << probs.watch << ","
@@ -790,6 +827,8 @@ World World::fromJson(const std::string& json) {
       int movedFlag = 0;
       extractIntField(obj, "moved", movedFlag);
       u.moved = movedFlag != 0;
+      extractIntField(obj, "seqTick", u.seqTick);
+      u.seqHidden = parseNumbers(extractArrayBody(obj, "seqHidden"));
       extractNumberField(obj, "hp", u.hp);
       extractNumberField(obj, "integrity", u.integrity);
       extractIntField(obj, "jamRadius", u.jamRadius);

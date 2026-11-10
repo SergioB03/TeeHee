@@ -27,7 +27,7 @@ void usage() {
       << "  edge-sim --world <path> opponent --side <red|blue>  let the computer give that side's orders for this tick\n"
       << "  edge-sim inputs                               names of the learned model's inputs, in order\n"
       << "Options:\n"
-      << "  --scorer <learned|heuristic>   which threat scorer fills threatScore (default learned)\n"
+      << "  --scorer <learned|heuristic|sequence>   which threat scorer fills threatScore (default learned)\n"
       << "  --actor <name>                 who is issuing this command, recorded in the decision log (default cli)\n"
       << "  --reason <text>                why, recorded in the decision log\n"
       << "  --no-log                       do not write to the decision log (bulk rollouts)\n"
@@ -220,8 +220,9 @@ int main(int argc, char** argv) {
     const std::string scorer = argValue(args, "--scorer");
     if (scorer == "learned") World::activeScorer = ScorerKind::Learned;
     else if (scorer == "heuristic") World::activeScorer = ScorerKind::Heuristic;
+    else if (scorer == "sequence") World::activeScorer = ScorerKind::Sequence;
     else {
-      std::cout << "{\"ok\":false,\"error\":\"bad --scorer (expected learned or heuristic)\"}\n";
+      std::cout << "{\"ok\":false,\"error\":\"bad --scorer (expected learned, heuristic or sequence)\"}\n";
       return 1;
     }
   }

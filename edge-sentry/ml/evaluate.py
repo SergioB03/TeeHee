@@ -4,8 +4,9 @@
     python3 ml/evaluate.py            # print results, rewrite ml/RESULTS.md
     python3 ml/evaluate.py --check    # also exit non-zero if a floor is missed (CI)
 
-Standard library only. Three scorers are compared on identical simulator output:
+Standard library only. The scorers are compared on identical simulator output:
     learned     small neural network on observable features and track history (the default scorer)
+    sequence    GRU that reads per-tick inputs and keeps its own memory (once ml/train_seq.py has run)
     heuristic   hand-set weights that also read the contact's real target
     v1          the original hand-set weights, observable features only
 """
@@ -14,6 +15,7 @@ import json
 import os
 import sys
 
+import seqlab
 import simlab
 from scenarios import LEVELS, SCENARIOS
 
@@ -23,25 +25,35 @@ p.add_argument("--check", action="store_true", help="fail if results fall below 
 args = p.parse_args()
 
 model = json.load(open(os.path.join(simlab.HERE, "model.json")))
+seq_model = seqlab.load()  # None until ml/train_seq.py has been run
 SCORERS = [
-    ("learned", "Learned model (observable inputs and track history)"),
-    ("heuristic", "Heuristic that reads the contact's target"),
-    ("v1", "Original heuristic (observable inputs only)"),
+    ("learned", "Learned model (observable inputs and track history)", "Learned"),
+    ("sequence", "Sequence model (GRU, per-tick inputs only, learns its own history)", "Sequence model"),
+    ("heuristic", "Heuristic that reads the contact's target", "Heuristic with target"),
+    ("v1", "Original heuristic (observable inputs only)", "Original heuristic"),
 ]
+if seq_model is None:
+    SCORERS = [s for s in SCORERS if s[0] != "sequence"]
+SHORT = {key: short for key, _, short in SCORERS}
+SCORERS = [(key, name) for key, name, _ in SCORERS]
 
 
 def scores_for(row_or_track, key):
     if key == "learned":
         return row_or_track["learned"] if "learned" in row_or_track else row_or_track["learnedScore"]
+    if key == "sequence":
+        return row_or_track["sequence"] if "sequence" in row_or_track else row_or_track["sequenceScore"]
     if key == "heuristic":
         return row_or_track["heuristic"] if "heuristic" in row_or_track else row_or_track["heuristicScore"]
     return simlab.v1_score(row_or_track["features"])
 
 
 def cuts(key):
-    """(watch, hostile) cut-offs: the learned model carries its own."""
+    """(watch, hostile) cut-offs: each trained model carries its own."""
     if key == "learned":
         return model["watch_at"], model["hostile_at"]
+    if key == "sequence":
+        return seq_model["watch_at"], seq_model["hostile_at"]
     return simlab.WATCH_AT, simlab.HOSTILE_AT
 
 
@@ -56,6 +68,11 @@ labels = [r["harm"] for r in rows]
 air = [r for r in rows if r["observed"][simlab.IX["airborne"]] > 0.5]
 air_labels = [r["harm"] for r in air]
 parity = max(abs(simlab.predict(model, r["observed"]) - r["learned"]) for r in rows)
+seq_parity = 0.0
+if seq_model:
+    for s in seqlab.sequences(rows):
+        ref = seqlab.scores(seq_model, s["x"])
+        seq_parity = max(seq_parity, max(abs(a - r["sequence"]) for a, r in zip(ref, s["rows"])))
 
 metrics = {}
 for key, _ in SCORERS:
@@ -124,21 +141,30 @@ for key, name in SCORERS:
     m = metrics[key]
     out.append(f"| {name} | {m['auc']:.3f} | {m['auc_air']:.3f} | {m['precision']:.2f} | {m['recall']:.2f} | {m['f1']:.2f} |")
 out.append("")
-out.append(f"\"At hostile\" means at or above each scorer's hostile cut-off: {model['hostile_at']:.2f} for the learned model "
-           "(chosen on validation rollouts to maximize F1), 0.66 for the heuristics. "
+seq_cut = f", {seq_model['hostile_at']:.2f} for the sequence model" if seq_model else ""
+out.append(f"\"At hostile\" means at or above each scorer's hostile cut-off: {model['hostile_at']:.2f} for the learned model"
+           f"{seq_cut} (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. "
            f"Air contacts (jets and missiles) are the hard cases: {len(air)} rows, {sum(air_labels) / len(air_labels):.0%} positive.")
 out.append("")
 out.append(f"## Scripted scenarios ({len(SCENARIOS)} cases with a known right call)")
 out.append("")
-out.append("| Scenario | Learned | Heuristic with target | Original heuristic |")
-out.append("| --- | --- | --- | --- |")
+out.append("| Scenario | " + " | ".join(SHORT[k] for k, _ in SCORERS) + " |")
+out.append("| --- |" + " --- |" * len(SCORERS))
 for name, per in scenario_results:
     cells = [("pass" if per[k][0] else "FAIL: " + per[k][1]) for k, _ in SCORERS]
     out.append(f"| {name} | " + " | ".join(cells) + " |")
-out.append(f"| **Passed** | **{passed['learned']} of {len(SCENARIOS)}** | **{passed['heuristic']} of {len(SCENARIOS)}** | **{passed['v1']} of {len(SCENARIOS)}** |")
+out.append("| **Passed** | " + " | ".join(f"**{passed[k]} of {len(SCENARIOS)}**" for k, _ in SCORERS) + " |")
 out.append("")
 bound = "1e-5" if parity < 1e-5 else f"{parity:.1e}"
 out.append(f"C++ and Python implementations of the model agree to within {bound} on every held-out row.")
+if seq_model:
+    seq_bound = "1e-5" if seq_parity < 1e-5 else f"{seq_parity:.1e}"
+    tr = seq_model["training"]
+    out.append("")
+    out.append(f"The sequence model is a GRU with {seq_model['hidden']} hidden units trained with PyTorch {tr['torch']} "
+               f"(`ml/train_seq.py`, {tr['epochs']} epochs). It sees {seqlab.SEQ_INPUTS} per-tick inputs and none of the "
+               "hand-built history inputs, and edge-sim carries its hidden state for each contact from tick to tick. "
+               f"Its C++ and Python implementations agree to within {seq_bound} on every held-out row.")
 out.append("")
 report = "\n".join(out)
 print(report)
@@ -148,6 +174,7 @@ with open(os.path.join(simlab.HERE, "RESULTS.md"), "w") as f:
 if args.check:
     floors = [
         ("C++/Python parity under 1e-4", parity < 1e-4),
+        ("sequence model C++/Python parity under 1e-4", seq_parity < 1e-4),
         ("learned AUC at least 0.95", metrics["learned"]["auc"] >= 0.95),
         ("learned AUC on air contacts at least 0.93", metrics["learned"]["auc_air"] >= 0.93),
         ("learned beats the observable-only heuristic by 0.10 AUC", metrics["learned"]["auc"] >= metrics["v1"]["auc"] + 0.10),

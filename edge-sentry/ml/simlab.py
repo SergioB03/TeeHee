@@ -219,6 +219,7 @@ def label_rows(snaps, seed, horizon=HORIZON):
                 "seed": seed, "tick": snap["tick"], "id": uid,
                 "observed": tr["observed"], "features": tr["features"],
                 "heuristic": tr["heuristicScore"], "learned": tr["learnedScore"],
+                "sequence": tr.get("sequenceScore", 0.5),
                 "harm": int(harm),
             })
     return rows

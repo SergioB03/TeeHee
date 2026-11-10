@@ -9,29 +9,32 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 | Scorer | AUC | AUC, air contacts only | Precision at hostile | Recall at hostile | F1 |
 | --- | --- | --- | --- | --- | --- |
 | Learned model (observable inputs and track history) | 0.978 | 0.949 | 0.89 | 0.91 | 0.90 |
+| Sequence model (GRU, per-tick inputs only, learns its own history) | 0.978 | 0.948 | 0.90 | 0.88 | 0.89 |
 | Heuristic that reads the contact's target | 0.896 | 0.939 | 0.88 | 0.49 | 0.63 |
 | Original heuristic (observable inputs only) | 0.799 | 0.603 | 0.49 | 0.05 | 0.09 |
 
-"At hostile" means at or above each scorer's hostile cut-off: 0.46 for the learned model (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. Air contacts (jets and missiles) are the hard cases: 7181 rows, 36% positive.
+"At hostile" means at or above each scorer's hostile cut-off: 0.46 for the learned model, 0.49 for the sequence model (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. Air contacts (jets and missiles) are the hard cases: 7181 rows, 36% positive.
 
 ## Scripted scenarios (14 cases with a known right call)
 
-| Scenario | Learned | Heuristic with target | Original heuristic |
-| --- | --- | --- | --- |
-| Missile homing on headquarters | pass | pass | FAIL: hit at tick 6, hostile never |
-| Jet parked at long range | pass | pass | pass |
-| Jammer already covering a relay | pass | pass | pass |
-| Jammer out of reach of everything | pass | pass | pass |
-| Jet attack run on a sensor | pass | FAIL: hit at tick 8, hostile only from tick 7 | FAIL: hit at tick 8, hostile never |
-| Jet flies past without attacking | pass | pass | pass |
-| Jet moves in next to headquarters and loiters | FAIL: benign at tick 8 | pass | pass |
-| Attacker stands down while still far away | pass | pass | pass |
-| Idle jet turns attacker mid-run | pass | pass | FAIL: hit at tick 12, hostile never |
-| Harmless red ground unit beside a relay | pass | pass | pass |
-| Jammer drives into range of a relay | pass | pass | pass |
-| Missile fired across the whole map | pass | pass | FAIL: hit at tick 10, hostile never |
-| Two jets, only one attacks | pass | FAIL: hit at tick 5, hostile never | FAIL: hit at tick 5, hostile never |
-| Missile that has no target | pass | pass | pass |
-| **Passed** | **13 of 14** | **12 of 14** | **9 of 14** |
+| Scenario | Learned | Sequence model | Heuristic with target | Original heuristic |
+| --- | --- | --- | --- | --- |
+| Missile homing on headquarters | pass | pass | pass | FAIL: hit at tick 6, hostile never |
+| Jet parked at long range | pass | pass | pass | pass |
+| Jammer already covering a relay | pass | pass | pass | pass |
+| Jammer out of reach of everything | pass | pass | pass | pass |
+| Jet attack run on a sensor | pass | pass | FAIL: hit at tick 8, hostile only from tick 7 | FAIL: hit at tick 8, hostile never |
+| Jet flies past without attacking | pass | pass | pass | pass |
+| Jet moves in next to headquarters and loiters | FAIL: benign at tick 8 | FAIL: benign at tick 8 | pass | pass |
+| Attacker stands down while still far away | pass | pass | pass | pass |
+| Idle jet turns attacker mid-run | pass | pass | pass | FAIL: hit at tick 12, hostile never |
+| Harmless red ground unit beside a relay | pass | pass | pass | pass |
+| Jammer drives into range of a relay | pass | pass | pass | pass |
+| Missile fired across the whole map | pass | FAIL: hit at tick 10, hostile never | pass | FAIL: hit at tick 10, hostile never |
+| Two jets, only one attacks | pass | pass | FAIL: hit at tick 5, hostile never | FAIL: hit at tick 5, hostile never |
+| Missile that has no target | pass | pass | pass | pass |
+| **Passed** | **13 of 14** | **12 of 14** | **12 of 14** | **9 of 14** |
 
 C++ and Python implementations of the model agree to within 1e-5 on every held-out row.
+
+The sequence model is a GRU with 16 hidden units trained with PyTorch 2.15.0 (`ml/train_seq.py`, 115 epochs). It sees 17 per-tick inputs and none of the hand-built history inputs, and edge-sim carries its hidden state for each contact from tick to tick. Its C++ and Python implementations agree to within 1e-5 on every held-out row.
