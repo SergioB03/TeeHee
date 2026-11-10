@@ -8,11 +8,11 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 
 | Scorer | AUC | AUC, air contacts only | Precision at hostile | Recall at hostile | F1 |
 | --- | --- | --- | --- | --- | --- |
-| Learned model (observable inputs only) | 0.961 | 0.918 | 0.87 | 0.89 | 0.88 |
+| Learned model (observable inputs and track history) | 0.978 | 0.949 | 0.89 | 0.91 | 0.90 |
 | Heuristic that reads the contact's target | 0.896 | 0.939 | 0.88 | 0.49 | 0.63 |
 | Original heuristic (observable inputs only) | 0.799 | 0.603 | 0.49 | 0.05 | 0.09 |
 
-"At hostile" means at or above each scorer's hostile cut-off: 0.45 for the learned model (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. Air contacts (jets and missiles) are the hard cases: 7181 rows, 36% positive.
+"At hostile" means at or above each scorer's hostile cut-off: 0.46 for the learned model (chosen on validation rollouts to maximize F1), 0.66 for the heuristics. Air contacts (jets and missiles) are the hard cases: 7181 rows, 36% positive.
 
 ## Scripted scenarios (14 cases with a known right call)
 
@@ -24,7 +24,7 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 | Jammer out of reach of everything | pass | pass | pass |
 | Jet attack run on a sensor | pass | FAIL: hit at tick 8, hostile only from tick 7 | FAIL: hit at tick 8, hostile never |
 | Jet flies past without attacking | pass | pass | pass |
-| Jet moves in next to headquarters and loiters | pass | pass | pass |
+| Jet moves in next to headquarters and loiters | FAIL: benign at tick 8 | pass | pass |
 | Attacker stands down while still far away | pass | pass | pass |
 | Idle jet turns attacker mid-run | pass | pass | FAIL: hit at tick 12, hostile never |
 | Harmless red ground unit beside a relay | pass | pass | pass |
@@ -32,6 +32,6 @@ Task: predict whether a red contact will harm a blue asset within 5 ticks (hit i
 | Missile fired across the whole map | pass | pass | FAIL: hit at tick 10, hostile never |
 | Two jets, only one attacks | pass | FAIL: hit at tick 5, hostile never | FAIL: hit at tick 5, hostile never |
 | Missile that has no target | pass | pass | pass |
-| **Passed** | **14 of 14** | **12 of 14** | **9 of 14** |
+| **Passed** | **13 of 14** | **12 of 14** | **9 of 14** |
 
 C++ and Python implementations of the model agree to within 1e-5 on every held-out row.

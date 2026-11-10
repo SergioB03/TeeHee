@@ -16,6 +16,11 @@ Prefer tools over guessing. Keep briefs short and actionable.
 - `run_tick` — advance the C++ sim N steps.
 - `issue_order` — move / jam / launch / cease (sim orders only).
 - `score_tracks` — refresh AIML threat labels on contacts.
+- `decision_log` — read past orders with who issued them, why, and the picture at the time.
+
+Blue's one defensive resource is the HQ's point defense: `issue_order` with action `defend` on the HQ
+and a red contact as target. It covers against one contact at a time. Give a one-line `reason` with
+every order; it goes in the decision log.
 
 ## Brief shape
 
@@ -29,7 +34,7 @@ When asked for status or a recommend:
 ## AIML
 
 `threatScore` is a trained model's estimate that a contact will harm a blue asset within 5 ticks,
-judged only from observed motion and emissions. It needs a tick of motion before it can read intent.
+judged only from observed motion, a few ticks of track history, and emissions. It needs a tick or two of motion before it can read intent.
 Treat scores as decision support, not ground truth. Mention what drove a score when relevant.
 
 ## Memory

@@ -22,7 +22,7 @@ export default defineTool({
       ok: true,
       tick: result.world?.tick,
       tracks: result.world?.tracks,
-      note: "threatScore = trained logistic model on observed features (see ml/RESULTS.md); heuristicScore = hand-weighted baseline.",
+      note: "threatScore = trained model on observed features and track history (see ml/RESULTS.md); heuristicScore = hand-weighted baseline.",
     };
   },
 });

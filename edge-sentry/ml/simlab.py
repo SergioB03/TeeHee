@@ -14,14 +14,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DEFAULT_SIM = os.path.join(ROOT, "native", "build", "edge-sim")
 
-# Order must match ObservedFeatures / observedInputs() in native/src/aiml_scorer.cpp.
-OBSERVED = [
-    "speed", "snr", "emitter", "proximity", "airborne", "closing",
-    "heading", "aimRange", "blueInField", "ewCover", "recentFire", "intercept",
-]
-IX = {name: i for i, name in enumerate(OBSERVED)}
-# The model sees the observed features plus two interaction terms.
-MODEL_INPUTS = OBSERVED + ["closing*proximity", "heading*aimRange"]
+
+
+def _input_names():
+    """Ask the simulator for the model's input names so the two cannot drift."""
+    binary = os.environ.get("EDGE_SIM") or DEFAULT_SIM
+    if not os.path.exists(binary):
+        raise SystemExit(f"edge-sim not found at {binary}. Build it with: npm run build:native")
+    return json.loads(subprocess.run([binary, "inputs"], capture_output=True, text=True).stdout)["inputs"]
+
+
+# Every track's `observed` vector follows this order (modelInputNames() in
+# native/src/aiml_scorer.hpp). The simulator computes all of it, including the
+# track-history inputs, so Python never re-derives a feature.
+MODEL_INPUTS = _input_names()
+IX = {name: i for i, name in enumerate(MODEL_INPUTS)}
 
 HORIZON = 5        # label: does the contact harm a blue asset within this many ticks
 TICKS = 22         # length of each generated rollout
@@ -33,16 +40,11 @@ WATCH_AT = 0.33
 V1_WEIGHTS = (0.20, 0.10, 0.30, 0.25, 0.15)
 
 
-def model_inputs(observed):
-    """Observed feature list -> model input list (adds the interaction terms)."""
-    return list(observed) + [
-        observed[IX["closing"]] * observed[IX["proximity"]],
-        observed[IX["heading"]] * observed[IX["aimRange"]],
-    ]
-
-
-def predict(weights, bias, observed):
-    z = bias + sum(w * x for w, x in zip(weights, model_inputs(observed)))
+def predict(model, observed):
+    """Reference forward pass: one tanh hidden layer, sigmoid output."""
+    z = model["out_bias"]
+    for weights, bias, out_w in zip(model["hidden_weights"], model["hidden_bias"], model["out_weights"]):
+        z += out_w * math.tanh(bias + sum(w * x for w, x in zip(weights, observed)))
     return 1.0 / (1.0 + math.exp(-z))
 
 
@@ -56,16 +58,18 @@ def v1_score(features):
 class Sim:
     """Thin wrapper over the edge-sim CLI with its own world file."""
 
-    def __init__(self, binary=None, scorer=None):
+    def __init__(self, binary=None, scorer=None, log=False):
         self.binary = binary or os.environ.get("EDGE_SIM") or DEFAULT_SIM
         if not os.path.exists(self.binary):
             raise SystemExit(f"edge-sim not found at {self.binary}. Build it with: npm run build:native")
         self.dir = tempfile.mkdtemp(prefix="edge-ml-")
         self.world = os.path.join(self.dir, "world.json")
         self.scorer = scorer
+        self.log = log
 
     def run(self, *args):
-        cmd = [self.binary, "--world", self.world]
+        # --no-log: bulk rollouts would otherwise fill the decision log.
+        cmd = [self.binary, "--world", self.world] + ([] if self.log else ["--no-log"])
         if self.scorer:
             cmd += ["--scorer", self.scorer]
         out = subprocess.run(cmd + [str(a) for a in args], capture_output=True, text=True).stdout
@@ -88,7 +92,9 @@ def unit(uid, kind, team, x, y, target=""):
     return {
         "id": uid, "type": kind, "team": team, "x": x, "y": y, "px": x, "py": y,
         "hp": 100, "integrity": 1, "jamRadius": 3 if kind == "jammer" else 0,
-        "targetId": target, "lastHitTick": -1000, "alive": True,
+        "targetId": target, "lastHitTick": -1000,
+        "c0": 0, "c1": 0, "c2": 0, "h0": 0, "h1": 0, "h2": 0, "r0": -1, "r1": -1, "r2": -1, "r3": -1,
+        "stopTicks": 0, "moved": 0, "alive": True,
         "order": {"action": "none", "tx": -1, "ty": -1, "targetId": ""},
     }
 

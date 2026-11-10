@@ -68,8 +68,11 @@ check("heuristic keeps its fixed 0.33 / 0.66 cut-offs",
 # --- learned scorer (default): observable inputs only -------------------------
 tracks = {t["sourceUnitId"]: t for t in out["world"]["tracks"]}
 check("learned scorer is the default", all(t["scorer"] == "learned" for t in tracks.values()))
-check("learned: observed vector has 12 values in 0..1",
-      all(len(t["observed"]) == 12 and all(0 <= v <= 1 for v in t["observed"]) for t in tracks.values()))
+names = json.loads(subprocess.run([SIM, "inputs"], capture_output=True, text=True).stdout)["inputs"]
+check("`inputs` lists the model's input names, history included",
+      len(names) == 24 and "closing" in names and "stopTicks" in names and "heading2" in names)
+check("learned: observed vector matches the input list, all values in 0..1",
+      all(len(t["observed"]) == len(names) and all(0 <= v <= 1 for v in t["observed"]) for t in tracks.values()))
 check("learned: both scores are reported for comparison",
       all("heuristicScore" in t and "learnedScore" in t for t in tracks.values()))
 check("learned: jammer covering the relay is at least watch", tracks["R-J1"]["threatLabel"] in ("watch", "hostile"))
@@ -139,6 +142,61 @@ jet = unit(out["world"], "R-JET1")
 check("move order arrives and clears", (jet["x"], jet["y"]) == (5, 5) and jet["order"]["action"] == "none")
 code, out = sim("order", "--id", "R-MSL1", "--action", "launch")
 check("launch with an existing standing target is accepted", code == 0 and out is not None and out["ok"])
+
+# --- track history ------------------------------------------------------------
+sim("reset")
+sim("order", "--id", "R-JET1", "--action", "move", "--tx", "8", "--ty", "2")
+sim("tick", "--n", "5")
+code, out = sim("status")
+jet = unit(out["world"], "R-JET1")
+check("history: a contact that moved then stopped remembers both",
+      jet["moved"] == 1 and jet["stopTicks"] == 3)
+jet_track = next(t for t in out["world"]["tracks"] if t["sourceUnitId"] == "R-JET1")
+check("history: stopTicks reaches the model inputs",
+      abs(jet_track["observed"][names.index("stopTicks")] - 3 / 6) < 1e-6)
+
+# --- HQ point defense ---------------------------------------------------------
+sim("reset")
+rejected("only an HQ can defend", "order", "--id", "B-S1", "--action", "defend", "--target", "R-MSL1", contains="hq")
+rejected("defend needs an opposing target", "order", "--id", "B-HQ", "--action", "defend", "--target", "B-S1", contains="opposing")
+code, out = sim("order", "--id", "B-HQ", "--action", "defend", "--target", "R-MSL1")
+check("HQ accepts a defend order", code == 0 and unit(out["world"], "B-HQ")["order"]["action"] == "defend")
+code, out = sim("tick", "--n", "6")
+kinds = [e["kind"] for e in out["world"]["events"]]
+check("a defended missile is blocked and HQ takes no damage",
+      "blocked" in kinds and "engage" not in kinds and unit(out["world"], "B-HQ")["hp"] == 100)
+sim("reset")
+code, out = sim("order", "--id", "B-HQ", "--action", "defend", "--target", "R-J1")
+code, out = sim("tick")
+check("a defended jammer's field is suppressed", unit(out["world"], "B-R1")["integrity"] == 1)
+
+# --- decision log -------------------------------------------------------------
+def decisions(n=50):
+    return sim("decisions", "--n", str(n))[1]["decisions"]
+
+before = len(decisions(500))
+sim("reset")
+sim("tick", "--n", "2")
+sim("order", "--id", "B-HQ", "--action", "defend", "--target", "R-MSL1", "--actor", "agent", "--reason", "Missile is closing on HQ")
+sim("order", "--id", "B-S1", "--action", "jam")
+log = decisions(500)
+check("reset, accepted and refused orders are all logged; ticks are not", len(log) == before + 3)
+entry = log[-2]
+check("log entry records actor, reason, order and outcome",
+      entry["actor"] == "agent" and entry["reason"] == "Missile is closing on HQ" and entry["ok"] is True
+      and entry["args"] == {"id": "B-HQ", "action": "defend", "target": "R-MSL1"} and entry["tick"] == 2)
+check("log entry carries the threat picture the decision was made on",
+      {p["id"] for p in entry["picture"]} == {"R-J1", "R-JET1", "R-MSL1"} and "closing" in entry["picture"][0]["inputs"])
+check("refused orders are logged with the simulator's reason",
+      log[-1]["ok"] is False and "jammers" in log[-1]["error"])
+sim("order", "--id", "B-HQ", "--action", "cease", "--reason", "--no-log")
+check("a reason that looks like a flag is kept as text and cannot switch logging off",
+      decisions(1)[0]["reason"] == "--no-log")
+sim("order", "--id", "B-HQ", "--action", "cease", "--no-log")
+check("--no-log skips the log (used for bulk rollouts)", len(decisions(500)) == before + 4)
+sim("order", "--id", "B-HQ", "--action", "cease", "--reason", 'line one\nwith "quotes" and a \\ backslash')
+check("the log stays valid JSON with quotes and newlines in a reason", decisions(1)[0]["reason"].startswith("line one"))
+rejected("bad --actor is rejected", "--actor", "not a name!", "status", contains="--actor")
 
 print()
 if failures:

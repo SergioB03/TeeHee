@@ -2,12 +2,12 @@
 """Train the threat model on simulator rollouts and export it to C++.
 
     npm run build:native
-    python3 ml/train.py            # needs numpy
+    python3 ml/train.py            # needs numpy and scikit-learn
     npm run build:native           # rebuild so edge-sim uses the new weights
     python3 ml/evaluate.py         # held-out metrics + scenario checks
 
-Model: logistic regression with a ridge penalty, fitted by Newton's method
-(IRLS). Target: does this contact harm a blue asset within HORIZON ticks.
+Model: a small neural network (one hidden layer of 16 tanh units, sigmoid
+output). Target: does this contact harm a blue asset within HORIZON ticks.
 The last fifth of the rollouts is held back as a validation split and used
 only to pick the two label cut-offs:
     hostile  the score that maximizes F1
@@ -22,12 +22,14 @@ import os
 import time
 
 import numpy as np
+from sklearn.neural_network import MLPClassifier
 
 import simlab
 
 p = argparse.ArgumentParser()
 p.add_argument("--scenarios", type=int, default=600, help="rollouts (seeds 0..N-1); the last fifth is validation")
-p.add_argument("--ridge", type=float, default=1.0, help="L2 penalty on the weights (not the bias)")
+p.add_argument("--hidden", type=int, default=16, help="hidden units")
+p.add_argument("--seed", type=int, default=0, help="weight initialization seed")
 args = p.parse_args()
 
 t0 = time.time()
@@ -35,33 +37,27 @@ all_rows = simlab.dataset(range(args.scenarios))
 first_val_seed = args.scenarios - args.scenarios // 5
 rows = [r for r in all_rows if r["seed"] < first_val_seed]
 val = [r for r in all_rows if r["seed"] >= first_val_seed]
-X = np.array([simlab.model_inputs(r["observed"]) for r in rows], dtype=float)
-y = np.array([r["harm"] for r in rows], dtype=float)
+X = np.array([r["observed"] for r in rows], dtype=float)
+y = np.array([r["harm"] for r in rows], dtype=int)
 print(f"{len(all_rows)} rows from {args.scenarios} rollouts in {time.time() - t0:.0f}s: "
       f"{len(rows)} train, {len(val)} validation, {y.mean():.1%} positive")
 
-A = np.hstack([X, np.ones((len(X), 1))])
-penalty = np.eye(A.shape[1]) * args.ridge
-penalty[-1, -1] = 0.0
-w = np.zeros(A.shape[1])
-for it in range(50):
-    z = A @ w
-    prob = 1 / (1 + np.exp(-z))
-    grad = A.T @ (prob - y) + penalty @ w
-    hess = (A * (prob * (1 - prob))[:, None]).T @ A + penalty
-    step = np.linalg.solve(hess, grad)
-    w -= step
-    if np.abs(step).max() < 1e-9:
-        break
-prob = 1 / (1 + np.exp(-(A @ w)))
-loss = -np.mean(y * np.log(prob + 1e-12) + (1 - y) * np.log(1 - prob + 1e-12))
-train_auc = simlab.auc(prob.tolist(), y.astype(int).tolist())
-print(f"converged in {it + 1} Newton steps, log loss {loss:.4f}, train AUC {train_auc:.4f}")
-
-weights, bias = [float(v) for v in w[:-1]], float(w[-1])
+net = MLPClassifier(hidden_layer_sizes=(args.hidden,), activation="tanh", alpha=1e-3,
+                    max_iter=1500, tol=1e-6, n_iter_no_change=30, random_state=args.seed)
+net.fit(X, y)
+model = {
+    "inputs": simlab.MODEL_INPUTS,
+    "hidden_weights": net.coefs_[0].T.tolist(),   # [hidden][input]
+    "hidden_bias": net.intercepts_[0].tolist(),
+    "out_weights": net.coefs_[1][:, 0].tolist(),
+    "out_bias": float(net.intercepts_[1][0]),
+    "horizon": simlab.HORIZON,
+}
+train_scores = [simlab.predict(model, r["observed"]) for r in rows]
+print(f"{net.n_iter_} epochs, log loss {net.loss_:.4f}, train AUC {simlab.auc(train_scores, y.tolist()):.4f}")
 
 # Label cut-offs from the validation split only.
-val_scores = [simlab.predict(weights, bias, r["observed"]) for r in val]
+val_scores = [simlab.predict(model, r["observed"]) for r in val]
 val_labels = [r["harm"] for r in val]
 grid = [i / 100 for i in range(5, 96)]
 hostile_at = max(grid, key=lambda t: simlab.prf(val_scores, val_labels, t)[2])
@@ -71,43 +67,47 @@ vp, vr, vf = simlab.prf(val_scores, val_labels, hostile_at)
 print(f"validation AUC {simlab.auc(val_scores, val_labels):.4f}; hostile at {hostile_at:.2f} "
       f"(precision {vp:.2f}, recall {vr:.2f}, F1 {vf:.2f}); watch at {watch_at:.2f} "
       f"(recall {simlab.prf(val_scores, val_labels, watch_at)[1]:.2f})")
-for name, value in zip(simlab.MODEL_INPUTS, weights):
-    print(f"  {name:<20} {value:+.3f}")
-print(f"  {'bias':<20} {bias:+.3f}")
 
-meta = {
-    "inputs": simlab.MODEL_INPUTS,
-    "weights": weights,
-    "bias": bias,
-    "horizon": simlab.HORIZON,
+model.update({
     "watch_at": watch_at,
     "hostile_at": hostile_at,
     "training": {"scenarios": args.scenarios, "rows": len(rows), "validation_rows": len(val),
-                 "positive_rate": float(y.mean()),
-                 "ridge": args.ridge, "log_loss": float(loss), "auc": float(train_auc)},
-}
+                 "positive_rate": float(y.mean()), "hidden": args.hidden, "seed": args.seed,
+                 "epochs": int(net.n_iter_), "log_loss": float(net.loss_)},
+})
 with open(os.path.join(simlab.HERE, "model.json"), "w") as f:
-    json.dump(meta, f, indent=2)
+    json.dump(model, f, indent=1)
     f.write("\n")
 
-n_obs = len(simlab.OBSERVED)
+
+def row(values):
+    return "{" + ", ".join(repr(float(v)) for v in values) + "}"
+
+
 lines = [
     "#pragma once",
     "// GENERATED by ml/train.py. Do not edit by hand; retrain instead.",
-    f"// Logistic regression, P(contact harms a blue asset within {simlab.HORIZON} ticks).",
+    f"// One hidden layer of {args.hidden} tanh units, sigmoid output:",
+    f"// P(contact harms a blue asset within {simlab.HORIZON} ticks).",
     f"// Trained on {len(rows)} rows; label cut-offs chosen on {len(val)} validation rows.",
     "// Inputs, in order: " + ", ".join(simlab.MODEL_INPUTS),
     "",
     "namespace edge_model {",
     f"constexpr double kWatchAt = {watch_at!r};",
     f"constexpr double kHostileAt = {hostile_at!r};",
-    f"constexpr int kNumObserved = {n_obs};",
-    f"constexpr int kNumInputs = {len(weights)};",
-    f"constexpr double kBias = {bias!r};",
-    "constexpr double kWeights[kNumInputs] = {",
+    f"constexpr int kNumInputs = {len(simlab.MODEL_INPUTS)};",
+    f"constexpr int kHidden = {args.hidden};",
+    "constexpr double kHiddenWeights[kHidden][kNumInputs] = {",
 ]
-lines += [f"    {v!r},  // {name}" for name, v in zip(simlab.MODEL_INPUTS, weights)]
-lines += ["};", "}  // namespace edge_model", ""]
+lines += ["    " + row(w) + "," for w in model["hidden_weights"]]
+lines += [
+    "};",
+    f"constexpr double kHiddenBias[kHidden] = {row(model['hidden_bias'])};",
+    f"constexpr double kOutWeights[kHidden] = {row(model['out_weights'])};",
+    f"constexpr double kOutBias = {model['out_bias']!r};",
+    "}  // namespace edge_model",
+    "",
+]
 header = os.path.join(simlab.ROOT, "native", "src", "model_weights.hpp")
 with open(header, "w") as f:
     f.write("\n".join(lines))

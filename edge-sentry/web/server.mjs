@@ -21,7 +21,7 @@ const PORT = Number(process.env.PORT) || 3100;
 
 // Must start with a letter or digit so an id can never be read as a CLI flag.
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,23}$/;
-const ACTIONS = new Set(["move", "jam", "launch", "cease"]);
+const ACTIONS = new Set(["move", "jam", "launch", "cease", "defend"]);
 const UNIT_TYPES = new Set(["sensor", "relay", "jammer", "jet", "missile", "hq"]);
 const TEAMS = new Set(["blue", "red"]);
 const MAX_TICKS = 50;
@@ -31,7 +31,8 @@ function runSim(args) {
   return new Promise((resolve) => {
     execFile(
       SIM,
-      ["--world", WORLD, ...args],
+      // Everything issued from this page is logged as actor "console".
+      ["--world", WORLD, "--actor", "console", ...args],
       { maxBuffer: 2 * 1024 * 1024, timeout: 10_000 },
       (err, stdout, stderr) => {
         // edge-sim exits non-zero for rejected commands but still prints
@@ -104,6 +105,9 @@ async function handleApi(req, res, route) {
   if (req.method === "GET" && route === "/api/state") {
     return send(res, 200, await sim(["status"]));
   }
+  if (req.method === "GET" && route === "/api/decisions") {
+    return send(res, 200, await sim(["decisions", "--n", "30"]));
+  }
   if (req.method !== "POST") return send(res, 405, { ok: false, error: "Use POST" });
 
   let body;
@@ -122,9 +126,9 @@ async function handleApi(req, res, route) {
   }
 
   if (route === "/api/order") {
-    const { id, action, tx, ty, target } = body;
+    const { id, action, tx, ty, target, reason } = body;
     if (typeof id !== "string" || !ID_RE.test(id)) return bad(res, "Unknown unit id");
-    if (!ACTIONS.has(action)) return bad(res, "action must be move, jam, launch or cease");
+    if (!ACTIONS.has(action)) return bad(res, "action must be move, jam, launch, cease or defend");
     const args = ["order", "--id", id, "--action", action];
     if (tx !== undefined || ty !== undefined) {
       if (!isInt(tx, 0, 255) || !isInt(ty, 0, 255)) return bad(res, "tx and ty must be map coordinates");
@@ -133,6 +137,11 @@ async function handleApi(req, res, route) {
     if (target !== undefined) {
       if (typeof target !== "string" || !ID_RE.test(target)) return bad(res, "Unknown target id");
       args.push("--target", target);
+    }
+    if (reason !== undefined) {
+      if (typeof reason !== "string" || reason.length > 300) return bad(res, "reason must be text up to 300 characters");
+      // Passed as one argv entry with no shell, so its content cannot become a flag or a command.
+      if (reason.trim()) args.push("--reason", reason.trim());
     }
     return send(res, 200, await sim(args));
   }

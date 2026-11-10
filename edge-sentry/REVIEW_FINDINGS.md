@@ -89,7 +89,7 @@ Fix: `runSim` catches the rejection and parses the captured stdout. Verified by 
 
 Added `closingOnBlue` feature + reweighted scorer so a homing missile can reach `hostile` without sitting in a jam field. `jamFieldAt` is team-aware (only opposing jammers). See `native/src/aiml_scorer.cpp` and `scoreAllTracks()`.
 
-Follow-up: `closingOnBlue` is set from the contact's actual `targetId`, so the heuristic is reading ground truth a sensor would not have. It is kept as `--scorer heuristic` for comparison. The default scorer is now a logistic model trained on simulator rollouts that uses observable inputs only (motion, emissions, effects on blue). On 200 held-out scenarios it scores AUC 0.961 against 0.896 for this heuristic, and passes 14 of 14 scripted scenarios against 12. See `ml/README.md` and `ml/RESULTS.md`.
+Follow-up: `closingOnBlue` is set from the contact's actual `targetId`, so the heuristic is reading ground truth a sensor would not have. It is kept as `--scorer heuristic` for comparison. The default scorer is now a small neural network trained on simulator rollouts that uses observable inputs only (motion, track history, emissions, effects on blue). On 200 held-out scenarios it scores AUC 0.978 against 0.896 for this heuristic, and passes 13 of 14 scripted scenarios against 12. See `ml/README.md` and `ml/RESULTS.md`.
 
 ### 7. Default scenario never exercises jamming — fixed
 

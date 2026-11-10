@@ -14,7 +14,13 @@ inline std::string jsonEscape(const std::string& s) {
       case '"': o << "\\\""; break;
       case '\\': o << "\\\\"; break;
       case '\n': o << "\\n"; break;
-      default: o << c; break;
+      case '\r': o << "\\r"; break;
+      case '\t': o << "\\t"; break;
+      default:
+        // Other control characters are not legal inside a JSON string.
+        if (static_cast<unsigned char>(c) < 0x20) o << ' ';
+        else o << c;
+        break;
     }
   }
   return o.str();

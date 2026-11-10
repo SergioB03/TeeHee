@@ -61,6 +61,7 @@ std::string orderToString(OrderAction a) {
     case OrderAction::Jam: return "jam";
     case OrderAction::Launch: return "launch";
     case OrderAction::Cease: return "cease";
+    case OrderAction::Defend: return "defend";
   }
   return "none";
 }
@@ -71,6 +72,7 @@ bool orderFromString(const std::string& s, OrderAction& out) {
   else if (s == "jam") out = OrderAction::Jam;
   else if (s == "launch") out = OrderAction::Launch;
   else if (s == "cease") out = OrderAction::Cease;
+  else if (s == "defend") out = OrderAction::Defend;
   else return false;
   return true;
 }
@@ -147,6 +149,7 @@ double World::jamFieldAt(int x, int y, Team against) const {
     if (!u.alive || u.type != UnitType::Jammer) continue;
     if (u.jamRadius <= 0) continue;
     if (against != Team::Unknown && u.team == against) continue;
+    if (isDefended(u.id)) continue;  // point defense suppresses this emitter
     const double d = dist(u.x, u.y, x, y);
     if (d <= u.jamRadius) {
       pressure = std::max(pressure, 1.0 - (d / static_cast<double>(u.jamRadius)));
@@ -197,6 +200,23 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
     if (err) *err = "only jet/missile can launch";
     return false;
   }
+  if (action == OrderAction::Defend) {
+    // Abstract point defense: an HQ covers against one contact at a time.
+    if (u->type != UnitType::HQ) {
+      if (err) *err = "only an hq can defend";
+      return false;
+    }
+    const Unit* tgt = targetId.empty() ? nullptr : findUnit(targetId);
+    if (!tgt || !tgt->alive || tgt->team == u->team) {
+      if (err) *err = "defend target must be a live opposing unit";
+      return false;
+    }
+    u->order = {};
+    u->order.action = action;
+    u->order.targetId = targetId;
+    events.push_back({tick, "order", id + " defend " + targetId});
+    return true;
+  }
   if (action == OrderAction::Move && (tx < 0 || ty < 0 || tx >= width || ty >= height)) {
     if (err) *err = "move needs --tx/--ty inside the map";
     return false;
@@ -220,6 +240,74 @@ bool World::issueOrder(const std::string& id, OrderAction action, int tx, int ty
   if (!targetId.empty()) u->targetId = targetId;
   events.push_back({tick, "order", id + " " + orderToString(action)});
   return true;
+}
+
+bool World::isDefended(const std::string& id, std::string* byHq) const {
+  for (const auto& u : units) {
+    if (!u.alive || u.type != UnitType::HQ) continue;
+    if (u.order.action == OrderAction::Defend && u.order.targetId == id) {
+      if (byHq) *byHq = u.id;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Range rate and bearing are taken against every blue asset and the strongest
+// is kept: the asset a contact is flying at is often not the nearest one.
+Kinematics World::kinematics(const Unit& u) const {
+  Kinematics k;
+  const double vx = u.x - u.px;
+  const double vy = u.y - u.py;
+  const double speed = std::sqrt(vx * vx + vy * vy);
+  for (const auto& b : units) {
+    if (!b.alive || b.team != Team::Blue) continue;
+    const double now = dist(b.x, b.y, u.x, u.y);
+    const double before = dist(b.x, b.y, u.px, u.py);
+    k.nearest = std::min(k.nearest, now);
+    k.closing = std::max(k.closing, (before - now) / 2.0);
+    // Time to intercept: at this range rate, how soon does it arrive?
+    if (before - now > 0) {
+      const double ticksOut = now / (before - now);
+      k.intercept = std::max(k.intercept, 1.0 - ticksOut / 10.0);
+    }
+    if (speed <= 0) continue;
+    // Bearing uses the position before the step so arriving on top of an
+    // asset still counts as heading straight at it.
+    double bearing = 0;
+    if (before > 0) {
+      const double toward = vx * (b.x - u.px) + vy * (b.y - u.py);
+      bearing = toward / (speed * before);
+    }
+    if (bearing > k.heading) {
+      k.heading = bearing;
+      k.aimRange = now > 12 ? 0 : 1.0 - now / 12.0;
+      // Perpendicular distance from the asset to the contact's line of motion.
+      const double off = before * std::sqrt(std::max(0.0, 1.0 - bearing * bearing));
+      k.miss = std::max(0.0, 1.0 - off / 3.0);
+    }
+  }
+  k.closing = std::max(0.0, std::min(1.0, k.closing));
+  k.heading = std::max(0.0, std::min(1.0, k.heading));
+  k.intercept = std::max(0.0, std::min(1.0, k.intercept));
+  return k;
+}
+
+// Called once at the end of every tick: shift each contact's short history.
+void World::recordHistory() {
+  for (auto& u : units) {
+    if (!u.alive) continue;
+    const Kinematics k = kinematics(u);
+    u.c2 = u.c1; u.c1 = u.c0; u.c0 = k.closing;
+    u.h2 = u.h1; u.h1 = u.h0; u.h0 = k.heading;
+    u.r3 = u.r2; u.r2 = u.r1; u.r1 = u.r0; u.r0 = (k.nearest < 1e8) ? k.nearest : -1;
+    if (u.x == u.px && u.y == u.py) {
+      ++u.stopTicks;
+    } else {
+      u.stopTicks = 0;
+      u.moved = true;
+    }
+  }
 }
 
 void World::scoreAllTracks() {
@@ -283,56 +371,50 @@ void World::scoreAllTracks() {
     }
     f.closingOnBlue = closing ? 1.0 : 0.0;
 
-    // Observable inputs for the learned model. Nothing below reads the
-    // contact's order or target; it is all kinematics, emissions and effects.
-    ObservedFeatures o;
+    // Inputs for the learned model, in modelInputNames() order. Nothing here
+    // reads the contact's order or target: it is kinematics, a few ticks of
+    // track history, emissions, and effects on blue assets.
+    const Kinematics k = kinematics(u);
     const double speedNow = std::sqrt(t.vx * t.vx + t.vy * t.vy);
-    o.speed = speedNow / 3.0;
-    o.snr = t.snr;
-    o.emitter = (u.type == UnitType::Jammer) ? 1.0 : 0.0;
-    o.proximity = prox;
-    o.airborne = f.altitudeHint;
-    // Range rate and bearing are taken against every blue asset and the
-    // strongest is kept: the asset a contact is flying at is often not the
-    // one it happens to be nearest to.
-    for (const auto& b : units) {
-      if (!b.alive || b.team != Team::Blue) continue;
-      const double now = dist(b.x, b.y, u.x, u.y);
-      const double before = dist(b.x, b.y, u.px, u.py);
-      o.closing = std::max(o.closing, (before - now) / 2.0);
-      // Time to intercept: at this range rate, how soon does it arrive?
-      if (before - now > 0) {
-        const double ticksOut = now / (before - now);
-        o.intercept = std::max(o.intercept, 1.0 - ticksOut / 10.0);
-      }
-      if (speedNow <= 0) continue;
-      // Bearing uses the position before the step so arriving on top of an
-      // asset still counts as heading straight at it.
-      double bearing = 0;
-      if (before > 0) {
-        const double toward = t.vx * (b.x - u.px) + t.vy * (b.y - u.py);
-        bearing = toward / (speedNow * before);
-      }
-      if (bearing > o.heading) {
-        o.heading = bearing;
-        o.aimRange = now > 12 ? 0 : 1.0 - now / 12.0;
-      }
-    }
+    double blueInField = 0, ewCover = 0;
     if (u.type == UnitType::Jammer && u.jamRadius > 0) {
       for (const auto& b : units) {
         if (!b.alive || b.team != Team::Blue) continue;
         if (!(b.type == UnitType::Sensor || b.type == UnitType::HQ || b.type == UnitType::Relay)) continue;
         const double d = dist(b.x, b.y, u.x, u.y);
-        if (d < u.jamRadius) {
-          o.blueInField = std::max(o.blueInField, 1.0 - d / static_cast<double>(u.jamRadius));
-        }
+        if (d < u.jamRadius) blueInField = std::max(blueInField, 1.0 - d / static_cast<double>(u.jamRadius));
       }
     } else {
-      o.ewCover = jamFieldAt(u.x, u.y, Team::Blue);
+      ewCover = jamFieldAt(u.x, u.y, Team::Blue);
     }
-    o.recentFire = (tick - u.lastHitTick <= 3) ? 1.0 : 0.0;
+    const std::vector<double> inputs = {
+        speedNow / 3.0,
+        t.snr,
+        (u.type == UnitType::Jammer) ? 1.0 : 0.0,
+        prox,
+        f.altitudeHint,
+        k.closing,
+        k.heading,
+        k.aimRange,
+        blueInField,
+        ewCover,
+        (tick - u.lastHitTick <= 3) ? 1.0 : 0.0,
+        k.intercept,
+        (nearestBlue <= 1.5) ? 1.0 : 0.0,
+        (nearestBlue < 0.5) ? 1.0 : 0.0,
+        (speedNow <= 0) ? 1.0 : 0.0,
+        k.miss,
+        (k.heading >= 0.98) ? 1.0 : 0.0,
+        std::min(u.stopTicks, 6) / 6.0,
+        u.moved ? 1.0 : 0.0,
+        (u.r3 >= 0 && nearestBlue < 1e8) ? (u.r3 - nearestBlue) / 6.0 : 0.0,
+        u.c1,
+        u.h1,
+        u.c2,
+        u.h2,
+    };
 
-    t.threat = scoreTrack(f, o, activeScorer);
+    t.threat = scoreTrack(f, inputs, activeScorer);
     tracks.push_back(t);
   }
 }
@@ -396,6 +478,17 @@ void World::tickOnce() {
     if (u.type == UnitType::Jet) pHit *= 0.6;
     // Deterministic-ish from tick+ids for reproducible demos
     const int h = static_cast<int>(u.id.size() * 17 + tgt->id.size() * 13 + tick * 31) % 100;
+    std::string blocker;
+    if (d <= 1.5 && h < static_cast<int>(pHit * 100) && isDefended(u.id, &blocker)) {
+      // The hit would have landed, but an HQ's point defense was on this contact.
+      events.push_back({tick, "blocked", u.id + " blocked by " + blocker});
+      if (u.type == UnitType::Missile) {
+        u.alive = false;
+        u.hp = 0;
+        events.push_back({tick, "expended", u.id});
+      }
+      continue;
+    }
     if (d <= 1.5 && h < static_cast<int>(pHit * 100)) {
       tgt->hp -= (u.type == UnitType::Missile) ? 40 : 15;
       u.lastHitTick = tick;
@@ -412,6 +505,8 @@ void World::tickOnce() {
       }
     }
   }
+
+  recordHistory();
 
   // Keep event log bounded
   if (events.size() > 40) {
@@ -441,6 +536,11 @@ std::string World::toJson(bool pretty) const {
       << "\"jamRadius\":" << u.jamRadius << ","
       << "\"targetId\":" << jsonString(u.targetId) << ","
       << "\"lastHitTick\":" << u.lastHitTick << ","
+      << "\"c0\":" << u.c0 << ",\"c1\":" << u.c1 << ",\"c2\":" << u.c2 << ","
+      << "\"h0\":" << u.h0 << ",\"h1\":" << u.h1 << ",\"h2\":" << u.h2 << ","
+      << "\"r0\":" << u.r0 << ",\"r1\":" << u.r1 << ",\"r2\":" << u.r2 << ",\"r3\":" << u.r3 << ","
+      << "\"stopTicks\":" << u.stopTicks << ","
+      << "\"moved\":" << (u.moved ? 1 : 0) << ","
       << "\"alive\":" << (u.alive ? "true" : "false") << ","
       << "\"order\":{"
       << "\"action\":" << jsonString(orderToString(u.order.action)) << ","
@@ -536,6 +636,20 @@ World World::fromJson(const std::string& json) {
       extractIntField(obj, "px", u.px);
       extractIntField(obj, "py", u.py);
       extractIntField(obj, "lastHitTick", u.lastHitTick);
+      extractNumberField(obj, "c0", u.c0);
+      extractNumberField(obj, "c1", u.c1);
+      extractNumberField(obj, "c2", u.c2);
+      extractNumberField(obj, "h0", u.h0);
+      extractNumberField(obj, "h1", u.h1);
+      extractNumberField(obj, "h2", u.h2);
+      extractNumberField(obj, "r0", u.r0);
+      extractNumberField(obj, "r1", u.r1);
+      extractNumberField(obj, "r2", u.r2);
+      extractNumberField(obj, "r3", u.r3);
+      extractIntField(obj, "stopTicks", u.stopTicks);
+      int movedFlag = 0;
+      extractIntField(obj, "moved", movedFlag);
+      u.moved = movedFlag != 0;
       extractNumberField(obj, "hp", u.hp);
       extractNumberField(obj, "integrity", u.integrity);
       extractIntField(obj, "jamRadius", u.jamRadius);
