@@ -37,6 +37,15 @@ jobs:
           curl -sf -X POST -H 'content-type: application/json' -d '{"id":"B-HQ","action":"defend","target":"R-JET1","reason":"ci smoke"}' http://127.0.0.1:3100/api/order | grep -q '"ok":true'
           curl -sf http://127.0.0.1:3100/api/decisions | grep -q '"reason":"ci smoke"'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"n":999}' http://127.0.0.1:3100/api/tick)" = 400
+      - name: Play mode smoke test (choose a side, play the computer)
+        run: |
+          J='content-type: application/json'; S='x-session: cismoke000001'; B=http://127.0.0.1:3100
+          curl -sf -X POST -H "$J" -H "$S" -d '{"side":"red"}' $B/api/game/start | grep -q '"side":"red"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$J" -H "$S" -d '{"id":"B-HQ","action":"cease"}' $B/api/order)" = 400
+          curl -sf -X POST -H "$J" -H "$S" -d '{"id":"R-MSL1","action":"launch","target":"B-HQ"}' $B/api/order | grep -q '"ok":true'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"n":20}' $B/api/tick | grep -q '"over":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$J" -H "$S" -d '{"n":1}' $B/api/tick)" = 400
+          curl -sf $B/api/state | grep -q '"game":null'
 
   typecheck:
     name: TypeScript and agent project

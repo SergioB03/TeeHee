@@ -23,6 +23,8 @@ void usage() {
       << "  edge-sim --world <path> spawn --type <sensor|relay|jammer|jet|missile|hq> --team <blue|red> --x N --y N\n"
       << "  edge-sim --world <path> order --id ID --action <move|jam|launch|cease|defend> [--tx N --ty N] [--target ID]\n"
       << "  edge-sim --world <path> decisions [--n N]     last N entries of the decision log (default 20)\n"
+      << "  edge-sim --world <path> reset --scenario skirmish   larger setup with no orders, used by play mode\n"
+      << "  edge-sim --world <path> opponent --side <red|blue>  let the computer give that side's orders for this tick\n"
       << "  edge-sim inputs                               names of the learned model's inputs, in order\n"
       << "Options:\n"
       << "  --scorer <learned|heuristic>   which threat scorer fills threatScore (default learned)\n"
@@ -69,12 +71,12 @@ struct Args {
 
 bool isCommand(const std::string& a) {
   return a == "status" || a == "reset" || a == "tick" || a == "score" || a == "spawn" || a == "order" ||
-         a == "decisions" || a == "inputs";
+         a == "decisions" || a == "inputs" || a == "opponent";
 }
 
 Args parseArgs(const std::vector<std::string>& raw) {
   static const std::set<std::string> kTakesValue = {
-      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team",
+      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side",
       "--x",     "--y",      "--id",    "--action", "--tx",     "--ty",   "--target"};
   Args out;
   for (size_t i = 0; i < raw.size(); ++i) {
@@ -143,6 +145,24 @@ std::string pictureJson(const World& w) {
     out.push_back(o.str());
   }
   return "[" + joinComma(out) + "]";
+}
+
+// One decision-log line. `argsJson` is the already-built {"id":...} object.
+void appendDecision(const std::string& logPath, int tick, const std::string& actor, const std::string& command,
+                    const std::string& argsJson, const std::string& reason, const std::string& err,
+                    const std::string& picture) {
+  std::ostringstream entry;
+  entry << "{\"at\":" << jsonString(nowUtc())
+        << ",\"tick\":" << tick
+        << ",\"actor\":" << jsonString(actor)
+        << ",\"command\":" << jsonString(command)
+        << ",\"args\":" << argsJson
+        << ",\"reason\":" << jsonString(reason)
+        << ",\"ok\":" << (err.empty() ? "true" : "false")
+        << ",\"error\":" << jsonString(err)
+        << ",\"picture\":" << picture << "}\n";
+  std::ofstream log(logPath, std::ios::app);
+  if (log) log << entry.str();
 }
 
 std::string lastLines(const std::string& path, int n) {
@@ -244,8 +264,41 @@ int main(int argc, char** argv) {
   const int tickBefore = world.tick;
   const std::string pictureBefore = isDecision ? pictureJson(world) : std::string();
 
+  std::string opponentOrders;  // JSON array, filled by the opponent command
   if (cmd == "reset") {
-    world.reset();
+    const std::string scenario = argValue(args, "--scenario");
+    if (scenario.empty() || scenario == "default") world.reset();
+    else if (scenario == "skirmish") world = World::skirmishScenario();
+    else err = "bad --scenario (expected default or skirmish)";
+  } else if (cmd == "opponent") {
+    Team side = Team::Unknown;
+    if (!teamFromString(argValue(args, "--side"), side) || side == Team::Unknown) {
+      err = "bad --side (expected red or blue)";
+    } else {
+      // Each order is logged on its own line, as actor "opponent", against
+      // the picture the plan was made on.
+      const std::string picture = pictureJson(world);
+      std::vector<std::string> issued;
+      for (const auto& m : world.planOpponent(side)) {
+        std::string moveErr;
+        world.issueOrder(m.id, m.action, m.tx, m.ty, m.targetId, &moveErr);
+        std::ostringstream a;
+        a << "{\"id\":" << jsonString(m.id) << ",\"action\":" << jsonString(orderToString(m.action));
+        if (m.tx >= 0) a << ",\"tx\":\"" << m.tx << "\",\"ty\":\"" << m.ty << "\"";
+        if (!m.targetId.empty()) a << ",\"target\":" << jsonString(m.targetId);
+        a << "}";
+        if (!hasFlag(args, "--no-log")) {
+          appendDecision(logPath, world.tick, "opponent", "order", a.str(), m.reason, moveErr, picture);
+        }
+        std::ostringstream o;
+        o << "{\"id\":" << jsonString(m.id) << ",\"action\":" << jsonString(orderToString(m.action))
+          << ",\"target\":" << jsonString(m.targetId) << ",\"tx\":" << m.tx << ",\"ty\":" << m.ty
+          << ",\"reason\":" << jsonString(m.reason) << ",\"ok\":" << (moveErr.empty() ? "true" : "false") << "}";
+        issued.push_back(o.str());
+      }
+      opponentOrders = "[" + joinComma(issued) + "]";
+      world.scoreAllTracks();
+    }
   } else if (cmd == "status") {
     // no-op
   } else if (cmd == "score") {
@@ -285,25 +338,17 @@ int main(int argc, char** argv) {
   }
 
   if (isDecision) {
-    std::ostringstream entry;
-    entry << "{\"at\":" << jsonString(nowUtc())
-          << ",\"tick\":" << tickBefore
-          << ",\"actor\":" << jsonString(actor)
-          << ",\"command\":" << jsonString(cmd)
-          << ",\"args\":{";
-    static const char* const kLogged[] = {"--id", "--action", "--tx", "--ty", "--target", "--type", "--team", "--x", "--y"};
+    std::ostringstream argsJson;
+    argsJson << "{";
+    static const char* const kLogged[] = {"--id", "--action", "--tx", "--ty", "--target", "--type", "--team", "--x", "--y", "--scenario"};
     bool first = true;
     for (const char* key : kLogged) {
       if (!hasFlag(args, key)) continue;
-      entry << (first ? "" : ",") << jsonString(std::string(key).substr(2)) << ":" << jsonString(argValue(args, key));
+      argsJson << (first ? "" : ",") << jsonString(std::string(key).substr(2)) << ":" << jsonString(argValue(args, key));
       first = false;
     }
-    entry << "},\"reason\":" << jsonString(reason)
-          << ",\"ok\":" << (err.empty() ? "true" : "false")
-          << ",\"error\":" << jsonString(err)
-          << ",\"picture\":" << pictureBefore << "}\n";
-    std::ofstream log(logPath, std::ios::app);
-    if (log) log << entry.str();
+    argsJson << "}";
+    appendDecision(logPath, tickBefore, actor, cmd, argsJson.str(), reason, err, pictureBefore);
   }
 
   if (!err.empty()) {
@@ -316,6 +361,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::cout << "{\"ok\":true,\"command\":\"" << cmd << "\",\"world\":" << world.toJson(false) << "}\n";
+  std::cout << "{\"ok\":true,\"command\":\"" << cmd << "\"";
+  if (cmd == "opponent") std::cout << ",\"orders\":" << opponentOrders;
+  std::cout << ",\"world\":" << world.toJson(false) << "}\n";
   return 0;
 }

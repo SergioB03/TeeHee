@@ -56,6 +56,16 @@ struct SimEvent {
   std::string detail;
 };
 
+// One order the computer opponent wants to give, and why.
+struct OpponentMove {
+  std::string id;
+  OrderAction action = OrderAction::None;
+  int tx = -1;
+  int ty = -1;
+  std::string targetId;
+  std::string reason;
+};
+
 // What blue can measure about one contact's motion relative to blue assets.
 struct Kinematics {
   double closing = 0;    // fastest range rate toward any blue asset, 0..1
@@ -80,6 +90,8 @@ struct World {
   static ScorerKind activeScorer;
 
   static World defaultScenario();
+  // A larger, order-free setup for play mode: nobody has a target yet.
+  static World skirmishScenario();
   static World fromJson(const std::string& json);
   std::string toJson(bool pretty = false) const;
 
@@ -93,6 +105,8 @@ struct World {
   void recordHistory();
   // True if an alive HQ's point defense is assigned to this unit this tick.
   bool isDefended(const std::string& id, std::string* byHq = nullptr) const;
+  // Computer opponent: the orders `side` would give right now, with reasons.
+  std::vector<OpponentMove> planOpponent(Team side) const;
   bool spawn(UnitType type, Team team, int x, int y, std::string* err);
   bool issueOrder(const std::string& id, OrderAction action, int tx, int ty,
                   const std::string& targetId, std::string* err);
