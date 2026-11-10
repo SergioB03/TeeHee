@@ -49,6 +49,9 @@ inline const std::vector<std::string>& modelInputNames() {
       "stopped",      // 1 if it did not move this tick
       "miss",         // how close its current line of motion passes to an asset
       "deadOn",       // 1 if it is pointed almost exactly at an asset
+      "altitude",     // altitude level, 0 = ground, 1 = ceiling
+      "descent",      // altitude lost this tick
+      "climb",        // altitude gained this tick
       // track history
       "stopTicks",    // consecutive ticks without moving
       "movedBefore",  // 1 if it has moved at any point
@@ -57,6 +60,7 @@ inline const std::vector<std::string>& modelInputNames() {
       "heading1",     // heading, one tick ago
       "closing2",     // closing, two ticks ago
       "heading2",     // heading, two ticks ago
+      "altDrop3",     // altitude lost over the last three ticks
   };
   return names;
 }
@@ -67,7 +71,7 @@ enum class ScorerKind { Learned, Heuristic, Sequence };
 // the first kSequenceInputs entries of modelInputNames(), the "this tick"
 // observations, and keeps its own memory of the track in a hidden state that
 // the simulator stores per contact. No hand-built history features.
-constexpr int kSequenceInputs = 17;
+constexpr int kSequenceInputs = 20;
 int sequenceHiddenSize();
 // One GRU step: consumes this tick's inputs, updates `hidden` in place.
 void sequenceStep(const std::vector<double>& inputs, std::vector<double>& hidden);

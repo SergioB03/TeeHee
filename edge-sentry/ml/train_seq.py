@@ -11,7 +11,7 @@ fifth held back for validation. Validation is used for early stopping and for
 the two label cut-offs (hostile = best F1, watch = 95% recall). The held-out
 seeds in ml/evaluate.py are never seen here.
 
-The model gets only the 17 inputs that describe the current tick, one tick at
+The model gets only the inputs that describe the current tick, one tick at
 a time, and has to build its own memory of the track. See ml/seqlab.py.
 """
 import argparse

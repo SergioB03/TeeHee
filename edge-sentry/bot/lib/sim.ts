@@ -16,6 +16,8 @@ export type SimUnit = {
   team: string;
   x: number;
   y: number;
+  /** Altitude level, 0 = ground, up to the world's ceiling (5). */
+  z: number;
   hp: number;
   integrity: number;
   jamRadius: number;
@@ -25,6 +27,7 @@ export type SimUnit = {
     action: string;
     tx: number;
     ty: number;
+    tz: number;
     targetId: string;
   };
 };
@@ -36,11 +39,15 @@ export type SimTrack = {
   y: number;
   vx: number;
   vy: number;
+  z: number;
+  vz: number;
   snr: number;
+  /** False when the track is too weak for point defense to shoot at the contact. */
+  locked: boolean;
   threatScore: number;
   threatLabel: string;
   /** Which scorer produced threatScore: the trained model (default) or the hand-set baseline. */
-  scorer?: "learned" | "heuristic";
+  scorer?: "learned" | "heuristic" | "sequence";
   watchAt?: number;
   hostileAt?: number;
   heuristicScore?: number;

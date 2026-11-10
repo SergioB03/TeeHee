@@ -70,7 +70,8 @@ tracks = {t["sourceUnitId"]: t for t in out["world"]["tracks"]}
 check("learned scorer is the default", all(t["scorer"] == "learned" for t in tracks.values()))
 names = json.loads(subprocess.run([SIM, "inputs"], capture_output=True, text=True).stdout)["inputs"]
 check("`inputs` lists the model's input names, history included",
-      len(names) == 24 and "closing" in names and "stopTicks" in names and "heading2" in names)
+      len(names) == 28 and "closing" in names and "stopTicks" in names and "heading2" in names
+      and "altitude" in names and "descent" in names and "altDrop3" in names)
 check("learned: observed vector matches the input list, all values in 0..1",
       all(len(t["observed"]) == len(names) and all(0 <= v <= 1 for v in t["observed"]) for t in tracks.values()))
 check("learned: both scores are reported for comparison",
@@ -201,34 +202,41 @@ rejected("bad --actor is rejected", "--actor", "not a name!", "status", contains
 # --- play mode: skirmish scenario and the computer opponent -------------------
 code, out = sim("reset", "--scenario", "skirmish")
 w = out["world"]
-check("skirmish scenario starts with 4 blue and 5 red units and no orders",
-      sum(u["team"] == "blue" for u in w["units"]) == 4 and sum(u["team"] == "red" for u in w["units"]) == 5
+check("skirmish scenario starts with 5 blue and 7 red units and no orders",
+      sum(u["team"] == "blue" for u in w["units"]) == 5 and sum(u["team"] == "red" for u in w["units"]) == 7
       and all(u["order"]["action"] == "none" for u in w["units"]))
+check("skirmish has a stealth fighter on each side, a bomber and a drone",
+      unit(w, "B-F1")["type"] == "stealth" and unit(w, "R-F1")["type"] == "stealth"
+      and unit(w, "R-BMR1")["type"] == "bomber" and unit(w, "R-DRN1")["type"] == "drone")
 rejected("unknown scenario is rejected", "reset", "--scenario", "nope", contains="scenario")
 rejected("opponent needs a side", "opponent", contains="--side")
 rejected("opponent rejects a bad side", "opponent", "--side", "green", contains="--side")
 before = len(decisions(500))
 code, out = sim("opponent", "--side", "red")
 orders = {o["id"]: o for o in out["orders"]}
-check("red opponent sends both missiles at HQ and each jet at a blue unit",
-      orders["R-MSL1"]["target"] == "B-HQ" and orders["R-MSL2"]["target"] == "B-HQ"
-      and orders["R-JET1"]["action"] == "launch" and orders["R-JET2"]["action"] == "launch"
+check("red opponent sends missiles and the bomber at HQ and the other aircraft at ground units",
+      orders["R-MSL1"]["target"] == "B-HQ" and orders["R-MSL2"]["target"] == "B-HQ" and orders["R-BMR1"]["target"] == "B-HQ"
+      and all(orders[i]["action"] == "launch" and orders[i]["target"] in ("B-S1", "B-S2", "B-R1") for i in ("R-JET1", "R-F1", "R-DRN1"))
       and all(o["ok"] for o in out["orders"]))
 check("red opponent never orders blue units", all(i.startswith("R-") for i in orders))
 log = decisions(500)
 check("each opponent order is logged with actor 'opponent' and a reason",
       len(log) == before + len(out["orders"]) and all(d["actor"] == "opponent" and d["reason"] for d in log[before:]))
-blocked = hits = 0
-for _ in range(12):
+blocked = kills = 0
+blue_orders = []
+for _ in range(20):
     code, out = sim("opponent", "--side", "blue", "--no-log")
-    check_orders = out["orders"]
+    blue_orders += out["orders"]
     code, out = sim("tick")
     for e in out["world"]["events"]:
         if e["tick"] == out["world"]["tick"]:
             blocked += e["kind"] == "blocked"
-            hits += e["kind"] == "engage" and "B-HQ" in e["detail"]
-check("blue opponent only ever orders its own HQ", all(o["id"] == "B-HQ" for o in check_orders))
-check("blue's model blocks at least one strike on HQ in the skirmish", blocked >= 1)
+            kills += e["kind"] == "destroyed" and e["detail"].startswith("R-")
+check("blue opponent only orders its own HQ and fighter", {o["id"] for o in blue_orders} == {"B-HQ", "B-F1"})
+check("blue's fighter is only sent after aircraft", all(o["target"] in ("R-JET1", "R-F1", "R-BMR1", "R-DRN1", "R-MSL1", "R-MSL2")
+                                                       for o in blue_orders if o["id"] == "B-F1"))
+check("blue's model blocks at least one strike in the skirmish", blocked >= 1)
+check("blue's fighter shoots down at least one red aircraft in the skirmish", kills >= 1)
 sim("reset")
 
 # --- sequence model: hidden state carried from tick to tick --------------------
@@ -249,6 +257,123 @@ check("sequence score is the same for 4 ticks at once and 4 single ticks with re
 code, out = sim("--scorer", "sequence", "status")
 check("--scorer sequence labels tracks from the sequence score",
       all(t["scorer"] == "sequence" and abs(t["threatScore"] - t["sequenceScore"]) < 1e-5 for t in out["world"]["tracks"]))
+sim("reset")
+
+# --- 3D: altitude, aircraft types, terrain masking, firing solutions ------------
+code, out = sim("reset")
+w = out["world"]
+check("world reports its altitude ceiling", w["ceiling"] == 5)
+check("aircraft start at cruise altitude and ground units at 0",
+      unit(w, "R-JET1")["z"] == 3 and unit(w, "R-MSL1")["z"] == 2 and unit(w, "B-HQ")["z"] == 0 and unit(w, "R-J1")["z"] == 0)
+check("tracks carry altitude and whether point defense has a lock",
+      all("z" in t and "vz" in t and isinstance(t["locked"], bool) for t in w["tracks"]))
+code, out = sim("spawn", "--type", "stealth", "--team", "red", "--x", "11", "--y", "11", "--z", "5")
+check("spawn accepts the new aircraft types and a starting altitude", code == 0 and out["world"]["units"][-1]["z"] == 5)
+fighter = out["world"]["units"][-1]["id"]
+rejected("drone cannot spawn above its ceiling", "spawn", "--type", "drone", "--team", "red", "--x", "5", "--y", "5", "--z", "4", contains="ceiling")
+rejected("ground unit cannot spawn in the air", "spawn", "--type", "sensor", "--team", "blue", "--x", "5", "--y", "9", "--z", "2", contains="ground")
+rejected("ground units cannot change altitude", "order", "--id", "B-S1", "--action", "altitude", "--tz", "2", contains="ground")
+rejected("altitude order needs a level", "order", "--id", "R-JET1", "--action", "altitude", contains="--tz")
+rejected("altitude above the ceiling is rejected", "order", "--id", "R-JET1", "--action", "altitude", "--tz", "9", contains="ceiling")
+rejected("missiles cannot orbit", "order", "--id", "R-MSL1", "--action", "orbit", contains="orbit")
+
+sim("order", "--id", "R-MSL1", "--action", "cease", "--no-log")
+sim("order", "--id", "R-JET1", "--action", "altitude", "--tz", "0", "--no-log")
+sim("order", "--id", fighter, "--action", "move", "--tx", "5", "--ty", "11", "--tz", "1", "--no-log")
+code, out = sim("tick")
+check("jet descends one level per tick", unit(out["world"], "R-JET1")["z"] == 2)
+f = unit(out["world"], fighter)
+check("stealth fighter covers two cells and two levels per tick", (f["x"], f["z"]) == (9, 3))
+jet_track = next(t for t in out["world"]["tracks"] if t["sourceUnitId"] == "R-JET1")
+check("the model sees altitude and descent", jet_track["observed"][names.index("descent")] == 0.5
+      and abs(jet_track["observed"][names.index("altitude")] - 0.4) < 1e-6 and jet_track["vz"] == -1)
+code, out = sim("tick", "--n", "2")
+jet = unit(out["world"], "R-JET1")
+f = unit(out["world"], fighter)
+check("altitude order finishes at the requested level", jet["z"] == 0 and jet["order"]["action"] == "none")
+check("move with --tz finishes when both position and level are reached",
+      (f["x"], f["y"], f["z"]) == (5, 11, 1) and f["order"]["action"] == "none")
+
+sim("reset")
+code, out = sim("order", "--id", "R-MSL1", "--action", "move", "--tx", "11", "--ty", "11", "--no-log")
+check("a move order replaces a standing attack", unit(out["world"], "R-MSL1")["targetId"] == "")
+sim("reset")
+sim("order", "--id", "R-JET1", "--action", "orbit", "--no-log")
+path = []
+for _ in range(4):
+    code, out = sim("tick")
+    j = unit(out["world"], "R-JET1")
+    path.append((j["x"], j["y"]))
+check("orbit flies a four-cell box and returns to where it started",
+      path == [(11, 2), (11, 3), (10, 3), (10, 2)] and j["order"]["action"] == "orbit" and j["z"] == 3)
+
+
+def custom_world(units):
+    """Rewrite the world file with hand-placed units, reusing the simulator's own unit layout."""
+    sim("reset")
+    world = json.load(open(WORLD))
+    template = world["units"][0]
+    built = []
+    for uid, kind, team, x, y, z in units:
+        u = json.loads(json.dumps(template))
+        u.update({"id": uid, "type": kind, "team": team, "x": x, "y": y, "px": x, "py": y, "z": z, "pz": z,
+                  "jamRadius": 3 if kind == "jammer" else 0, "targetId": "", "hp": 100, "integrity": 1})
+        built.append(u)
+    world.update({"units": built, "tracks": [], "events": [], "tick": 0})
+    json.dump(world, open(WORLD, "w"))
+    return sim("status")[1]["world"]
+
+
+# Release altitude: a jet beside its target cannot hit until it is down at level 2.
+custom_world([("B-HQ", "hq", "blue", 0, 0, 0), ("B-S1", "sensor", "blue", 6, 6, 0), ("R-JET1", "jet", "red", 7, 6, 5)])
+sim("order", "--id", "R-JET1", "--action", "launch", "--target", "B-S1", "--no-log")
+early_hits, later_hits, levels = 0, 0, []
+for t in range(1, 13):
+    code, out = sim("tick")
+    levels.append(unit(out["world"], "R-JET1")["z"])
+    hit = any(e["tick"] == t and e["kind"] == "engage" for e in out["world"]["events"])
+    early_hits += hit and t < 3
+    later_hits += hit and t >= 3
+check("an attacker descends to its release altitude", levels[:4] == [4, 3, 2, 2])
+check("no hits land from above release altitude, hits land once it is down", early_hits == 0 and later_hits >= 1)
+
+# Terrain masking: the ridge cell (3,4) sits between the sensor and the drone.
+low = custom_world([("B-S1", "sensor", "blue", 3, 2, 0), ("R-DRN1", "drone", "red", 3, 7, 1)])["tracks"][0]
+high = custom_world([("B-S1", "sensor", "blue", 3, 2, 0), ("R-DRN1", "drone", "red", 3, 7, 2)])["tracks"][0]
+check("a low contact behind cover is masked: weaker track and no lock; one level up it is seen",
+      low["snr"] < high["snr"] and low["locked"] is False and high["locked"] is True)
+loud = custom_world([("B-S1", "sensor", "blue", 3, 2, 0), ("R-BMR1", "bomber", "red", 9, 2, 4)])["tracks"][0]
+quiet = custom_world([("B-S1", "sensor", "blue", 3, 2, 0), ("R-F1", "stealth", "red", 9, 2, 4)])["tracks"][0]
+check("a stealth fighter gives a much weaker track than a bomber at the same place", quiet["snr"] < loud["snr"] / 2)
+
+# Firing solution: with the only nearby sensor jammed, point defense cannot stop a stealth fighter.
+custom_world([("B-HQ", "hq", "blue", 0, 0, 0), ("B-S1", "sensor", "blue", 9, 9, 0),
+              ("R-J1", "jammer", "red", 10, 9, 0), ("R-F1", "stealth", "red", 11, 11, 4)])
+sim("order", "--id", "R-F1", "--action", "launch", "--target", "B-S1", "--no-log")
+sim("order", "--id", "B-HQ", "--action", "defend", "--target", "R-F1", "--no-log")
+seen = []
+for _ in range(10):
+    code, out = sim("tick")
+    seen += [e["kind"] for e in out["world"]["events"] if e["tick"] == out["world"]["tick"]]
+check("defending a contact with no lock does not block it", "nolock" in seen and "engage" in seen and "blocked" not in seen)
+
+# Air to air.
+custom_world([("B-HQ", "hq", "blue", 0, 0, 0), ("B-F1", "stealth", "blue", 2, 2, 4), ("R-JET1", "jet", "red", 9, 2, 3),
+              ("R-BMR1", "bomber", "red", 9, 9, 4)])
+rejected("bombers cannot attack aircraft", "order", "--id", "R-BMR1", "--action", "launch", "--target", "B-F1", contains="ground targets")
+sim("order", "--id", "B-F1", "--action", "launch", "--target", "R-JET1", "--no-log")
+for _ in range(14):
+    code, out = sim("tick")
+check("a fighter climbs or dives to its target's level and shoots it down in two hits",
+      unit(out["world"], "R-JET1")["alive"] is False and unit(out["world"], "B-F1")["z"] == 3)
+old = json.load(open(WORLD))
+for u in old["units"]:
+    for key in ("z", "pz", "a0", "a1", "a2", "a3"):
+        u.pop(key, None)
+json.dump(old, open(WORLD, "w"))
+code, out = sim("status")
+check("a world saved before altitude existed loads with aircraft at cruise level",
+      code == 0 and unit(out["world"], "R-BMR1")["z"] == 4 and unit(out["world"], "B-HQ")["z"] == 0)
 sim("reset")
 
 print()

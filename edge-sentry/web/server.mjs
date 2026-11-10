@@ -29,8 +29,9 @@ const PORT = Number(process.env.PORT) || 3100;
 // Must start with a letter or digit so an id can never be read as a CLI flag.
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,23}$/;
 const SESSION_RE = /^[a-z0-9]{12,40}$/;
-const ACTIONS = new Set(["move", "jam", "launch", "cease", "defend"]);
-const UNIT_TYPES = new Set(["sensor", "relay", "jammer", "jet", "missile", "hq"]);
+const ACTIONS = new Set(["move", "altitude", "orbit", "jam", "launch", "cease", "defend"]);
+const UNIT_TYPES = new Set(["sensor", "relay", "jammer", "hq", "jet", "stealth", "bomber", "drone", "missile"]);
+const CEILING = 5; // altitude levels 0..5; the simulator enforces each type's own ceiling
 const TEAMS = new Set(["blue", "red"]);
 const MAX_TICKS = 50;
 const MAX_BODY_BYTES = 4096;
@@ -154,13 +155,14 @@ function publicGame(game) {
     hits: game.hits,
     blocked: game.blocked,
     lost: game.lost,
+    shotDown: game.shotDown ?? 0,
   };
 }
 
 async function startGame(session, side) {
   const res = await runSim(session.world, "console", ["reset", "--scenario", "skirmish"]);
   if (!res.ok) return res;
-  const game = { side, limit: GAME_TICKS, ticks: 0, sum: 0, hits: 0, blocked: 0, lost: 0, over: false };
+  const game = { side, limit: GAME_TICKS, ticks: 0, sum: 0, hits: 0, blocked: 0, lost: 0, shotDown: 0, over: false };
   await saveGame(session, game);
   return { ...res, game: publicGame(game), opponentOrders: [] };
 }
@@ -178,10 +180,13 @@ async function gameTick(session, game, n) {
     const world = last.world;
     game.ticks += 1;
     game.sum += blueValue(world);
+    const teamOf = (id) => world.units.find((u) => u.id === id)?.team;
     for (const e of world.events) {
       if (e.tick !== world.tick) continue;
-      if (e.kind === "engage") game.hits += 1;
+      // Hits are red's hits on blue. Blue's fighter hitting red is counted when it shoots something down.
+      if (e.kind === "engage" && teamOf(e.detail.split(" hit ")[1]) === "blue") game.hits += 1;
       if (e.kind === "blocked") game.blocked += 1;
+      if (e.kind === "destroyed" && teamOf(e.detail) === "red") game.shotDown = (game.shotDown ?? 0) + 1;
     }
     game.lost = world.units.filter((u) => u.team === "blue" && !u.alive).length;
     if (game.ticks >= game.limit) game.over = true;
@@ -281,13 +286,17 @@ async function handleApi(req, res, route) {
   }
 
   if (route === "/api/order") {
-    const { id, action, tx, ty, target, reason } = body;
+    const { id, action, tx, ty, tz, target, reason } = body;
     if (typeof id !== "string" || !ID_RE.test(id)) return bad(res, "Unknown unit id");
-    if (!ACTIONS.has(action)) return bad(res, "action must be move, jam, launch, cease or defend");
+    if (!ACTIONS.has(action)) return bad(res, "action must be move, altitude, orbit, jam, launch, cease or defend");
     const args = ["order", "--id", id, "--action", action];
     if (tx !== undefined || ty !== undefined) {
       if (!isInt(tx, 0, 255) || !isInt(ty, 0, 255)) return bad(res, "tx and ty must be map coordinates");
       args.push("--tx", String(tx), "--ty", String(ty));
+    }
+    if (tz !== undefined) {
+      if (!isInt(tz, 0, CEILING)) return bad(res, `tz must be an altitude level from 0 to ${CEILING}`);
+      args.push("--tz", String(tz));
     }
     if (target !== undefined) {
       if (typeof target !== "string" || !ID_RE.test(target)) return bad(res, "Unknown target id");
@@ -311,15 +320,16 @@ async function handleApi(req, res, route) {
 
   if (route === "/api/spawn") {
     if (game) return bad(res, "Adding units is off during a game");
-    const { type, team, x, y } = body;
+    const { type, team, x, y, z } = body;
     if (!UNIT_TYPES.has(type)) return bad(res, "Unknown unit type");
     if (!TEAMS.has(team)) return bad(res, "team must be blue or red");
     if (!isInt(x, 0, 255) || !isInt(y, 0, 255)) return bad(res, "x and y must be map coordinates");
-    return send(
-      res,
-      200,
-      withGame(await sim(["spawn", "--type", type, "--team", team, "--x", String(x), "--y", String(y)])),
-    );
+    const spawnArgs = ["spawn", "--type", type, "--team", team, "--x", String(x), "--y", String(y)];
+    if (z !== undefined) {
+      if (!isInt(z, 0, CEILING)) return bad(res, `z must be an altitude level from 0 to ${CEILING}`);
+      spawnArgs.push("--z", String(z));
+    }
+    return send(res, 200, withGame(await sim(spawnArgs)));
   }
 
   return send(res, 404, { ok: false, error: "No such endpoint" });

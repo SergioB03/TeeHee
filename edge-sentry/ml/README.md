@@ -10,24 +10,25 @@ Labels come from the simulator's future, not from a rule. Each rollout is run to
 
 ## What the model may see
 
-24 inputs, all observable from the blue side and all scaled to 0..1. `edge-sim inputs` prints the list, and the simulator computes every one of them, so the Python side never re-derives a feature.
+28 inputs, all observable from the blue side and all scaled to 0..1. `edge-sim inputs` prints the list, and the simulator computes every one of them, so the Python side never re-derives a feature.
 
 | Group | Inputs |
 | --- | --- |
 | Motion this tick | `speed`, `closing` (range rate toward any blue asset), `heading` (how directly it points at one), `aimRange`, `intercept` (time to reach an asset), `miss` (how close its line of motion passes), `deadOn`, `stopped` |
 | Position | `proximity`, `inRange` (within 1.5 cells), `onAsset` |
-| Track history | `stopTicks`, `movedBefore`, `rangeDrop3` (closer than three ticks ago), `closing1`, `heading1`, `closing2`, `heading2` |
+| Altitude | `altitude` (level 0 to 5), `descent` and `climb` (levels changed this tick) |
+| Track history | `stopTicks`, `movedBefore`, `rangeDrop3` (closer than three ticks ago), `closing1`, `heading1`, `closing2`, `heading2`, `altDrop3` (altitude lost over three ticks) |
 | Emissions and effects | `emitter`, `blueInField`, `ewCover`, `recentFire`, `snr`, `airborne` |
 
 The model never reads a contact's orders or target. The earlier heuristic's `closingOnBlue` input does read the target assignment, which is why it is reported separately as a privileged baseline.
 
-Track history is what closed the gap on jets and missiles. With single-tick inputs a linear model scored AUC 0.918 on air contacts, behind the target-reading heuristic at 0.939. Simple streak counters did not help. Remembering whether a contact has moved, how long it has been stopped, and what it was doing one and two ticks ago took it to 0.949: a jet that flew in and stopped beside a sensor is a different thing from one that has sat there all along.
+Track history is what closed the gap on jets and missiles. On the earlier flat (2D) simulator, a linear model with single-tick inputs scored AUC 0.918 on air contacts, behind the target-reading heuristic at 0.939. Simple streak counters did not help. Remembering whether a contact has moved, how long it has been stopped, and what it was doing one and two ticks ago took it to 0.949 there: a jet that flew in and stopped beside a sensor is a different thing from one that has sat there all along. In 3D the air-only gap reopened slightly (0.938 vs 0.942); see Limits.
 
 ## Data
 
-`simlab.random_scenario(seed)` builds a random blue layout and two to six red contacts: attackers, contacts in transit (half of them routed close to a blue asset without attacking), loiterers, jammers, and harmless ground units. About a third change behavior mid-run: attackers stand down, idle contacts turn and attack. Each rollout runs 22 ticks through the real `edge-sim` binary.
+`simlab.random_scenario(seed)` builds a random blue layout and two to six red contacts: attackers, contacts in transit (half of them routed close to a blue asset without attacking), loiterers, jammers, and harmless ground units. The aircraft are jets, stealth fighters, bombers and drones at varied starting altitudes; some climb, descend or orbit without ever attacking, so a descent on its own does not give an attack away, and about a quarter of rollouts give blue a fighter of its own. About a third change behavior mid-run: attackers stand down, idle contacts turn and attack. Each rollout runs 22 ticks through the real `edge-sim` binary.
 
-- Training: seeds 0 to 479 (32,206 contact-ticks, 35% positive)
+- Training: seeds 0 to 479 (32,618 contact-ticks, 31% positive)
 - Validation: seeds 480 to 599, used only to choose the two label cut-offs
 - Held-out test: seeds 100000 to 100199, never touched by training
 - Outcome evaluation: seeds 200000 to 200149
@@ -53,11 +54,11 @@ python3 ml/outcome.py      # standard library only, about two minutes
 
 ## Sequence model (PyTorch)
 
-`train_seq.py` trains a GRU with 16 hidden units on the same rollouts and splits. It reads one contact one tick at a time and sees only the first 17 inputs, the ones that describe the current tick. The hand-built history inputs (ticks stopped, range closed over 3 ticks, lagged closing and heading) are withheld, so any memory of the track has to be learned. Validation is used for early stopping and for the same two cut-off rules.
+`train_seq.py` trains a GRU with 16 hidden units on the same rollouts and splits. It reads one contact one tick at a time and sees only the first 20 inputs, the ones that describe the current tick (altitude, climb and descent included). The hand-built history inputs (ticks stopped, range closed and altitude lost over 3 ticks, lagged closing and heading) are withheld, so any memory of the track has to be learned. Validation is used for early stopping and for the same two cut-off rules.
 
 `seqlab.py` holds a plain-Python forward pass and the exporter, so evaluation does not need PyTorch. The trainer refuses to write weights unless that forward pass reproduces PyTorch's scores. In edge-sim each contact's hidden state lives in the world file and advances once per tick.
 
-Result: the same held-out AUC as the default model with less feature engineering, and one fewer scripted scenario passed (it misses a missile fired from across the whole map until too late). See `RESULTS.md`.
+Result on the 3D simulator: the same held-out AUC as the default model (0.967 vs 0.968), the same scripted scenarios passed, and slightly better triage outcomes (see `OUTCOMES.md`), with less feature engineering. See `RESULTS.md`.
 
 ```bash
 python3 ml/train_seq.py    # needs torch; or run the "Train sequence model" workflow
@@ -65,22 +66,25 @@ python3 ml/train_seq.py    # needs torch; or run the "Train sequence model" work
 
 ## Evaluation: prediction
 
-`evaluate.py` compares three scorers on identical simulator output: the learned model, the heuristic that reads the target, and the original heuristic. It reports AUC, precision, recall and F1 on the held-out rollouts, runs the 14 scripted scenarios in `scenarios.py`, and checks that the C++ scorer and the Python reference agree on every row. With `--check` it exits non-zero if a floor is missed, which is what CI runs.
+`evaluate.py` compares four scorers on identical simulator output: the learned model, the sequence model, the heuristic that reads the target, and the original heuristic. It reports AUC, precision, recall and F1 on the held-out rollouts, runs the 19 scripted scenarios in `scenarios.py`, and checks that the C++ scorer and the Python reference agree on every row. With `--check` it exits non-zero if a floor is missed, which is what CI runs.
 
-The scenario expectations were written from each scenario's intent (who attacks, who never does) and were not changed after seeing any scorer's output. The model fails one of them.
+The scenario expectations were written from each scenario's intent (who attacks, who never does) and were not changed after seeing any scorer's output. Five of them exercise the 3D rules: a stealth attack run, a high-level bomber run, a drone coming in low behind cover, a jet that descends far away and holds, and a fighter orbiting at long range. Both models fail the same two of the 19.
 
 ## Evaluation: outcomes
 
 A good score only matters if acting on it helps. `outcome.py` gives blue one defensive resource (the HQ's point defense covers against one contact per tick) and lets each scorer decide where to put it, by score × severity. Every policy plays the same 150 rollouts and is scored on mission value: the average over every tick and blue asset of health × integrity.
 
-The agent is graded the same way. `evals/outcome.eval.ts` seeds five scripted scenarios into the agent's workspace, asks it to run the defense for 12 ticks, recomputes mission value from its own `run_tick` results, and compares it with no defense and with the learned-model policy. It also fails the run if the agent orders a red unit or resets the scenario. That eval needs a model login and has not been run yet.
+The agent is graded the same way. `evals/outcome.eval.ts` seeds eight scripted scenarios into the agent's workspace, asks it to run the defense for 12 ticks, recomputes mission value from its own `run_tick` results, and compares it with no defense and with the learned-model policy. It also fails the run if the agent orders a red unit or resets the scenario. That eval needs a model login and has not been run yet.
 
 ## Limits
 
 - A contact flying toward a sensor looks the same whether it will attack or pass by. History narrows that, it does not remove it.
 - It needs a tick or two of motion before it can say anything about intent.
-- A jet that parks next to HQ without firing reads as benign, because in the training data parked jets rarely attack. A human would keep watching it. This is the scripted scenario the model fails.
+- A jet that parks next to HQ without firing reads as benign, because in the training data parked jets rarely attack. A human would keep watching it. This is one of the two scripted scenarios the models fail.
+- A distant jammer that is about to drive into range is called hostile at tick 0, before it has moved. The label is technically right (it does jam a relay within the horizon), but the model cannot know that yet, so it is over-calling stationary jammers. This is the other failed scenario.
+- On aircraft and missiles alone, the heuristic that reads each contact's real target ranks slightly better in 3D (0.942 vs 0.938 AUC). Altitude added behaviors (bombers that never descend, harmless descents) that observable motion separates less cleanly.
+- Track quality only weakens with stealth, range and terrain; a contact is never lost entirely. Real sensors drop tracks.
 - One-step lookahead is greedy, so it is a strong reference for outcomes, not a true ceiling. On one scripted scenario the learned policy beats it.
-- The outcome policy assumes the contact's class (jet, missile, jammer) is known.
+- The outcome policy assumes the contact's class (jet, stealth fighter, bomber, drone, missile, jammer) is known.
 - The simulator is small and its hit roll is a deterministic hash, so these numbers describe this sandbox, not the real world.
 - The training distribution is the scenario generator. Different mixes of attackers and fly-bys would move the cut-offs.

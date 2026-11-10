@@ -5,8 +5,8 @@ import { runSim } from "../lib/sim";
 
 export default defineTool({
   description: prompt`
-    Read the current terrain sandbox: units (sensors, jammers, jets, missiles),
-    AIML track threat scores, jam pressure effects, and recent sim events.
+    Read the current 3D sandbox: units (sensors, jammers, aircraft, missiles) with
+    their altitude level z, AIML track threat scores and whether each track is locked, jam pressure effects, and recent sim events.
     Call this before briefing ops or after orders/ticks.
   `,
   inputSchema: z.object({

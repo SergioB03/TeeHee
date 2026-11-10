@@ -21,13 +21,14 @@ def _input_names():
     binary = os.environ.get("EDGE_SIM") or DEFAULT_SIM
     if not os.path.exists(binary):
         raise SystemExit(f"edge-sim not found at {binary}. Build it with: npm run build:native")
-    return json.loads(subprocess.run([binary, "inputs"], capture_output=True, text=True).stdout)["inputs"]
+    info = json.loads(subprocess.run([binary, "inputs"], capture_output=True, text=True).stdout)
+    return info["inputs"], info["sequenceInputs"]
 
 
 # Every track's `observed` vector follows this order (modelInputNames() in
 # native/src/aiml_scorer.hpp). The simulator computes all of it, including the
 # track-history inputs, so Python never re-derives a feature.
-MODEL_INPUTS = _input_names()
+MODEL_INPUTS, SEQUENCE_INPUTS = _input_names()
 IX = {name: i for i, name in enumerate(MODEL_INPUTS)}
 
 HORIZON = 5        # label: does the contact harm a blue asset within this many ticks
@@ -86,16 +87,23 @@ class Sim:
         return self.run("status")
 
 
-def unit(uid, kind, team, x, y, target=""):
+# Highest altitude level each aircraft type can reach (profileOf() in native/src/world.cpp).
+CEILING = {"jet": 5, "stealth": 5, "bomber": 5, "drone": 2, "missile": 5}
+CRUISE = {"jet": 3, "stealth": 4, "bomber": 4, "drone": 1, "missile": 2}
+
+
+def unit(uid, kind, team, x, y, target="", z=None):
     # Key order matters: edge-sim's reader expects the unit-level targetId
-    # before the nested order object.
+    # before the nested order object. z defaults to the type's cruise level.
+    z = CRUISE.get(kind, 0) if z is None else z
     return {
-        "id": uid, "type": kind, "team": team, "x": x, "y": y, "px": x, "py": y,
+        "id": uid, "type": kind, "team": team, "x": x, "y": y, "px": x, "py": y, "z": z, "pz": z,
         "hp": 100, "integrity": 1, "jamRadius": 3 if kind == "jammer" else 0,
         "targetId": target, "lastHitTick": -1000,
         "c0": 0, "c1": 0, "c2": 0, "h0": 0, "h1": 0, "h2": 0, "r0": -1, "r1": -1, "r2": -1, "r3": -1,
+        "a0": -1, "a1": -1, "a2": -1, "a3": -1,
         "stopTicks": 0, "moved": 0, "alive": True,
-        "order": {"action": "none", "tx": -1, "ty": -1, "targetId": ""},
+        "order": {"action": "none", "tx": -1, "ty": -1, "tz": -1, "targetId": ""},
     }
 
 
@@ -105,7 +113,10 @@ def random_scenario(seed):
     Returns (units, orders) where orders is a list of (tick, args) to issue
     before that tick is simulated. Red contacts are a mix of attackers,
     contacts in transit (some passing close to blue), loiterers, jammers and
-    harmless ground units, with some changing behavior mid-run.
+    harmless ground units, with some changing behavior mid-run. Aircraft
+    also start at varied altitudes and some climb, descend or orbit without
+    ever attacking, so a descent on its own does not give an attack away.
+    About a quarter of the rollouts give blue a fighter of its own.
     """
     rng = random.Random(seed)
     taken = set()
@@ -131,25 +142,46 @@ def random_scenario(seed):
         units.append(unit(uid, kind, "blue", x, y))
         blue.append((uid, (x, y)))
 
-    kinds = ["jet"] * 7 + ["missile"] * 5 + ["jammer"] * 4 + ["sensor"] * 2 + ["relay"] * 2
+    kinds = (["jet"] * 5 + ["stealth"] * 3 + ["bomber"] * 2 + ["drone"] * 3 + ["missile"] * 5
+             + ["jammer"] * 4 + ["sensor"] * 2 + ["relay"] * 2)
+    prefix = {"jet": "JET", "stealth": "F", "bomber": "BMR", "drone": "DRN", "missile": "M",
+              "jammer": "JAM", "sensor": "GS", "relay": "GR"}
+    red_aircraft = []
     for i in range(rng.randint(2, 6)):
         kind = rng.choice(kinds)
         # Vary id length: the simulator's hit roll depends on it.
-        uid = "R-" + {"jet": "JET", "missile": "M", "jammer": "JAM", "sensor": "GS", "relay": "GR"}[kind] + str(rng.choice([i + 1, (i + 1) * 11]))
+        uid = "R-" + prefix[kind] + str(rng.choice([i + 1, (i + 1) * 11]))
         x, y = cell()
-        units.append(unit(uid, kind, "red", x, y))
+        z = None
+        if kind in CEILING and rng.random() < 0.3:
+            z = rng.randint(0 if kind != "missile" else 1, CEILING[kind])
+        units.append(unit(uid, kind, "red", x, y, z=z))
         roll = rng.random()
         change_at = rng.randint(3, 14) if rng.random() < 0.3 else None
-        if kind in ("jet", "missile"):
-            if roll < 0.45:
+        if kind in CEILING:
+            if kind != "missile":
+                red_aircraft.append(uid)
+            level = ["--tz", rng.randint(0, CEILING[kind])] if rng.random() < 0.4 else []
+            if roll < 0.42:
                 orders.append((0, ["order", "--id", uid, "--action", "launch", "--target", rng.choice(blue)[0]]))
                 if change_at:
                     orders.append((change_at, ["order", "--id", uid, "--action", "cease"]))
-            elif roll < 0.75:
-                # In transit: half pass close to a blue asset without attacking.
+            elif roll < 0.66:
+                # In transit: half pass close to a blue asset without attacking,
+                # some changing altitude on the way.
                 dest = near(rng.choice(blue)[1], 2) if rng.random() < 0.5 else (rng.randrange(12), rng.randrange(12))
-                orders.append((0, ["order", "--id", uid, "--action", "move", "--tx", dest[0], "--ty", dest[1]]))
+                orders.append((0, ["order", "--id", uid, "--action", "move", "--tx", dest[0], "--ty", dest[1]] + level))
                 if change_at:
+                    orders.append((change_at, ["order", "--id", uid, "--action", "launch", "--target", rng.choice(blue)[0]]))
+            elif roll < 0.76 and kind != "missile":
+                # Loiter: fly somewhere (sometimes near blue), then orbit there.
+                dest = near(rng.choice(blue)[1], 3) if rng.random() < 0.5 else (rng.randrange(12), rng.randrange(12))
+                orders.append((0, ["order", "--id", uid, "--action", "move", "--tx", dest[0], "--ty", dest[1]]))
+                orders.append((rng.randint(2, 8), ["order", "--id", uid, "--action", "orbit"] + level))
+            elif roll < 0.86:
+                # Change altitude and nothing else.
+                orders.append((rng.randint(0, 6), ["order", "--id", uid, "--action", "altitude", "--tz", rng.randint(0, CEILING[kind])]))
+                if change_at and change_at > 6:
                     orders.append((change_at, ["order", "--id", uid, "--action", "launch", "--target", rng.choice(blue)[0]]))
             elif change_at:
                 orders.append((change_at, ["order", "--id", uid, "--action", "launch", "--target", rng.choice(blue)[0]]))
@@ -163,6 +195,16 @@ def random_scenario(seed):
                 orders.append((change_at, ["order", "--id", uid, "--action", "move", "--tx", rng.randrange(12), "--ty", rng.randrange(12)]))
         elif roll < 0.4:
             orders.append((0, ["order", "--id", uid, "--action", "move", "--tx", rng.randrange(12), "--ty", rng.randrange(12)]))
+
+    # Sometimes blue has a fighter, which may patrol or intercept a red aircraft.
+    if rng.random() < 0.25:
+        x, y = cell()
+        units.append(unit("B-F1", rng.choice(["jet", "stealth"]), "blue", x, y))
+        roll = rng.random()
+        if roll < 0.5 and red_aircraft:
+            orders.append((rng.randint(0, 8), ["order", "--id", "B-F1", "--action", "launch", "--target", rng.choice(red_aircraft)]))
+        elif roll < 0.8:
+            orders.append((0, ["order", "--id", "B-F1", "--action", "orbit"]))
     return units, orders
 
 

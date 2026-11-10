@@ -20,8 +20,9 @@ void usage() {
       << "  edge-sim --world <path> reset\n"
       << "  edge-sim --world <path> tick [--n N]\n"
       << "  edge-sim --world <path> score\n"
-      << "  edge-sim --world <path> spawn --type <sensor|relay|jammer|jet|missile|hq> --team <blue|red> --x N --y N\n"
-      << "  edge-sim --world <path> order --id ID --action <move|jam|launch|cease|defend> [--tx N --ty N] [--target ID]\n"
+      << "  edge-sim --world <path> spawn --type <sensor|relay|jammer|hq|jet|stealth|bomber|drone|missile> --team <blue|red> --x N --y N [--z N]\n"
+      << "  edge-sim --world <path> order --id ID --action <move|altitude|orbit|jam|launch|cease|defend> [--tx N --ty N] [--tz N] [--target ID]\n"
+      << "      altitude levels run 0 (ground) to 5; aircraft types differ in speed, climb, ceiling and signature\n"
       << "  edge-sim --world <path> decisions [--n N]     last N entries of the decision log (default 20)\n"
       << "  edge-sim --world <path> reset --scenario skirmish   larger setup with no orders, used by play mode\n"
       << "  edge-sim --world <path> opponent --side <red|blue>  let the computer give that side's orders for this tick\n"
@@ -77,7 +78,7 @@ bool isCommand(const std::string& a) {
 Args parseArgs(const std::vector<std::string>& raw) {
   static const std::set<std::string> kTakesValue = {
       "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side",
-      "--x",     "--y",      "--id",    "--action", "--tx",     "--ty",   "--target"};
+      "--x",     "--y",      "--z",     "--id",     "--action", "--tx",   "--ty",   "--tz",       "--target"};
   Args out;
   for (size_t i = 0; i < raw.size(); ++i) {
     const std::string& a = raw[i];
@@ -123,7 +124,7 @@ bool validActor(const std::string& s) {
 // The threat picture a decision was made on: one entry per tracked contact
 // with its label, score and the model inputs an operator would point to.
 std::string pictureJson(const World& w) {
-  static const char* const kShown[] = {"proximity", "closing", "heading", "intercept", "blueInField", "recentFire", "stopTicks"};
+  static const char* const kShown[] = {"proximity", "closing", "heading", "intercept", "altitude", "descent", "blueInField", "recentFire", "stopTicks"};
   const auto& names = modelInputNames();
   std::vector<std::string> out;
   for (const auto& t : w.tracks) {
@@ -205,7 +206,8 @@ int main(int argc, char** argv) {
   if (args.command == "inputs") {
     std::vector<std::string> names;
     for (const auto& n : modelInputNames()) names.push_back(jsonString(n));
-    std::cout << "{\"ok\":true,\"command\":\"inputs\",\"inputs\":[" << joinComma(names) << "]}\n";
+    std::cout << "{\"ok\":true,\"command\":\"inputs\",\"inputs\":[" << joinComma(names)
+              << "],\"sequenceInputs\":" << kSequenceInputs << "}\n";
     return 0;
   }
 
@@ -282,7 +284,7 @@ int main(int argc, char** argv) {
       std::vector<std::string> issued;
       for (const auto& m : world.planOpponent(side)) {
         std::string moveErr;
-        world.issueOrder(m.id, m.action, m.tx, m.ty, m.targetId, &moveErr);
+        world.issueOrder(m.id, m.action, m.tx, m.ty, m.tz, m.targetId, &moveErr);
         std::ostringstream a;
         a << "{\"id\":" << jsonString(m.id) << ",\"action\":" << jsonString(orderToString(m.action));
         if (m.tx >= 0) a << ",\"tx\":\"" << m.tx << "\",\"ty\":\"" << m.ty << "\"";
@@ -315,33 +317,38 @@ int main(int argc, char** argv) {
   } else if (cmd == "spawn") {
     UnitType type = UnitType::Sensor;
     Team team = Team::Blue;
-    int x = 0, y = 0;
+    int x = 0, y = 0, z = -1;
+    const std::string zs = argValue(args, "--z");
     if (!unitTypeFromString(argValue(args, "--type"), type)) err = "bad --type";
     else if (!teamFromString(argValue(args, "--team"), team)) err = "bad --team";
     else if (!parseInt(argValue(args, "--x"), x) || !parseInt(argValue(args, "--y"), y)) {
       err = "missing or bad --x/--y";
-    } else if (world.spawn(type, team, x, y, &err)) {
+    } else if (!zs.empty() && (!parseInt(zs, z) || z < 0)) {
+      err = "bad --z (expected an altitude level from 0)";
+    } else if (world.spawn(type, team, x, y, z, &err)) {
       world.scoreAllTracks();
     }
   } else if (cmd == "order") {
     OrderAction action = OrderAction::None;
     const std::string id = argValue(args, "--id");
-    int tx = -1, ty = -1;
+    int tx = -1, ty = -1, tz = -1;
     const std::string txs = argValue(args, "--tx");
     const std::string tys = argValue(args, "--ty");
+    const std::string tzs = argValue(args, "--tz");
     if (!orderFromString(argValue(args, "--action"), action)) err = "bad --action";
     else if (!txs.empty() && !parseInt(txs, tx)) err = "bad --tx";
     else if (!tys.empty() && !parseInt(tys, ty)) err = "bad --ty";
+    else if (!tzs.empty() && (!parseInt(tzs, tz) || tz < 0)) err = "bad --tz (expected an altitude level from 0)";
     else {
       const std::string target = argValue(args, "--target");
-      if (world.issueOrder(id, action, tx, ty, target, &err)) world.scoreAllTracks();
+      if (world.issueOrder(id, action, tx, ty, tz, target, &err)) world.scoreAllTracks();
     }
   }
 
   if (isDecision) {
     std::ostringstream argsJson;
     argsJson << "{";
-    static const char* const kLogged[] = {"--id", "--action", "--tx", "--ty", "--target", "--type", "--team", "--x", "--y", "--scenario"};
+    static const char* const kLogged[] = {"--id", "--action", "--tx", "--ty", "--tz", "--target", "--type", "--team", "--x", "--y", "--z", "--scenario"};
     bool first = true;
     for (const char* key : kLogged) {
       if (!hasFlag(args, key)) continue;
