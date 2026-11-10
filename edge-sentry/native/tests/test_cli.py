@@ -231,6 +231,26 @@ check("blue opponent only ever orders its own HQ", all(o["id"] == "B-HQ" for o i
 check("blue's model blocks at least one strike on HQ in the skirmish", blocked >= 1)
 sim("reset")
 
+# --- sequence model: hidden state carried from tick to tick --------------------
+def seq_scores(world):
+    return [round(t["sequenceScore"], 9) for t in world["tracks"]]
+
+sim("reset")
+code, out = sim("tick", "--n", "4")
+in_one_call = seq_scores(out["world"])
+sim("reset")
+for _ in range(3):
+    sim("tick")
+    sim("status")                                             # extra reads and orders in between
+    sim("order", "--id", "B-HQ", "--action", "cease", "--no-log")   # must not advance the memory
+code, out = sim("tick")
+check("sequence score is the same for 4 ticks at once and 4 single ticks with reads in between",
+      seq_scores(out["world"]) == in_one_call and len(in_one_call) == 3)
+code, out = sim("--scorer", "sequence", "status")
+check("--scorer sequence labels tracks from the sequence score",
+      all(t["scorer"] == "sequence" and t["threatScore"] == t["sequenceScore"] for t in out["world"]["tracks"]))
+sim("reset")
+
 print()
 if failures:
     print("%d check(s) FAILED" % len(failures))
