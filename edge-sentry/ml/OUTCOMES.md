@@ -8,16 +8,17 @@ Blue's HQ can cover against one contact per tick. Each policy below decides whic
 
 | Policy | Mission value | Gain relative to lookahead | Hits taken | Hits blocked | Health at end | Assets lost |
 | --- | --- | --- | --- | --- | --- | --- |
-| No defense | 0.871 | 0% | 3.45 | 0.00 | 83.2 | 0.09 |
-| Defend a random contact | 0.906 | 36% | 2.50 | 1.04 | 88.0 | 0.03 |
-| Triage by original heuristic | 0.922 | 51% | 1.98 | 1.55 | 91.5 | 0.03 |
-| Triage by heuristic that reads the target | 0.929 | 59% | 1.77 | 1.76 | 92.8 | 0.02 |
-| Triage by learned model | 0.946 | 76% | 1.56 | 2.01 | 93.6 | 0.02 |
-| One-step lookahead (uses the simulator's future) | 0.970 | 100% | 1.14 | 2.39 | 95.3 | 0.01 |
+| No defense | 0.880 | 0% | 3.24 | 0.00 | 83.8 | 0.31 |
+| Defend a random contact | 0.911 | 30% | 2.58 | 0.97 | 87.1 | 0.19 |
+| Triage by original heuristic | 0.926 | 46% | 2.22 | 1.33 | 90.8 | 0.15 |
+| Triage by heuristic that reads the target | 0.935 | 55% | 1.96 | 1.66 | 92.4 | 0.09 |
+| Triage by learned model | 0.951 | 70% | 1.63 | 2.09 | 92.6 | 0.07 |
+| Triage by sequence model (GRU) | 0.954 | 74% | 1.57 | 2.17 | 93.0 | 0.06 |
+| One-step lookahead (uses the simulator's future) | 0.980 | 100% | 0.84 | 2.95 | 96.5 | 0.03 |
 
 "Gain relative to lookahead" is how much of the distance from no defense to one-step lookahead a policy recovers. Lookahead is greedy (it only sees one tick ahead), so it is a strong reference, not a true ceiling. Hits, blocks and losses are averages per rollout.
 
-## 5 scripted scenarios, 12 ticks (the agent eval plays these)
+## 8 scripted scenarios, 12 ticks (the agent eval plays these)
 
 | Scenario | No defense | Learned model | Lookahead |
 | --- | --- | --- | --- |
@@ -25,4 +26,7 @@ Blue's HQ can cover against one contact per tick. Each policy below decides whic
 | Jet attack run on a sensor | 0.975 | 1.000 | 1.000 |
 | Jammer drives into range of a relay | 0.850 | 1.000 | 1.000 |
 | Missile fired across the whole map | 0.950 | 1.000 | 1.000 |
-| Two jets, only one attacks | 0.942 | 0.996 | 1.000 |
+| Two jets, only one attacks | 0.942 | 1.000 | 1.000 |
+| Stealth fighter attack run on headquarters | 0.911 | 1.000 | 1.000 |
+| Bomber run on headquarters from high level | 0.942 | 1.000 | 1.000 |
+| Drone comes in low behind cover to hit a sensor | 0.990 | 1.000 | 1.000 |
