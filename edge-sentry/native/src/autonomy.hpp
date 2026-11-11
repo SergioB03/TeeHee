@@ -68,13 +68,19 @@ struct PlannerConfig {
   // An engaged fighter stays on its target unless the score falls well below the watch line. Off by default:
   // it stops some back-and-forth between shadowing and engaging, at the cost of more bystanders shot.
   bool commit = false;
+  // A damaged fighter (at or below half health) stops picking fights with armed aircraft that have done nothing
+  // yet, but keeps attacking the ones that cannot shoot back (bombers, drones) and the ones already seen hitting
+  // a blue unit. Going home helps nobody: nothing is repaired there, and the strike carries on without it.
+  // Off ("gohome"): it fights only a contact hunting it and otherwise returns to headquarters.
+  bool pressOn = true;
   // How much of a covered contact's loss point defense is trusted to stop. Below
   // 1 because a lock can drop, headquarters can be hit, and the model can be
   // wrong; it is what makes a fighter worth sending at a contact that point
   // defense is already covering.
   double coverTrust = 0.75;
 };
-// "full", or one behavior switched off for comparison: "nolead", "notimed", "nopatrol", "freefire", "nodefense";
+// "full", or one behavior switched off for comparison: "nolead", "notimed", "nopatrol", "freefire", "nodefense",
+// "gohome", "untaught" (neither self-defense nor pressing on: the planner before it was taught either);
 // or one option switched on: "closein" (a close approach also counts as hunting), "commit".
 bool plannerConfigFromName(const std::string& name, PlannerConfig& out);
 

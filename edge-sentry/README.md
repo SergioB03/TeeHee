@@ -52,8 +52,8 @@ The last column matters because the simulator does not punish shooting an aircra
 | Check | Result |
 | --- | --- |
 | Ticks where the node's orders differed from the in-simulator planner | 0 of 880 |
-| Planning time in the node, median and worst | 39 µs and 222 µs |
-| TCP round trip, median and 99th percentile | 0.27 ms and 0.53 ms |
+| Planning time in the node, median and 99th percentile | 37 µs and 109 µs |
+| TCP round trip, median and 99th percentile | 0.25 ms and 0.42 ms |
 | Mission value on a direct link, losing 30% of messages, losing 60%, link down | 0.970, 0.964, 0.950, 0.878 |
 
 A reply that misses the 50 ms tick budget is thrown away and units keep their last orders, so a bad link degrades gradually and a dead one is exactly as good as no autonomy (0.878), never worse. Those timings are from the development machine. CI also cross-compiles the node for arm64 and runs the same tests under emulation, which shows the build is right for a Raspberry Pi or Jetson but says nothing about their speed; it has not been timed on a physical device yet.
@@ -64,10 +64,15 @@ A reply that misses the 50 ms tick budget is thrown away and units keep their la
 | --- | --- | --- | --- |
 | Original script | the planner | 0.843 | 100% |
 | Coordinated doctrine | nobody | 0.636 | 54% |
-| Coordinated doctrine | the planner, before it was taught self-defense | 0.766 | 56% |
-| Coordinated doctrine | **the planner** | **0.815** | **91%** |
+| Coordinated doctrine | the planner, before the two lessons below | 0.766 | 56% |
+| Coordinated doctrine | **the planner** | **0.824** | **91%** |
 
-The third row is where the planner stood at first: it lost its fighter in almost half the battles. Replaying those showed two rules working against it. A damaged fighter turned for home, and a hunter as fast as it is simply followed and finished it; and hold-fire stopped it shooting back at a hunter the threat model had scored low. The planner now treats a contact that has hit one of blue's aircraft as hostile whatever its score, fights it instead of running, and lets point defense cover it. My first attempt (count every armed contact as a threat to the fighter) made results worse; this one was tuned on separate battles and then measured on these. It leaves the 150-rollout table above unchanged (0.974, 0.11). Going one step further and treating a fighter that closes to two cells as hostile before it fires gets 0.823 and 94% here but shoots down more aircraft that never attacked (0.19 against 0.11), so it is not the default. Full table: [`ml/OPPONENT.md`](ml/OPPONENT.md).
+The third row is where the planner stood at first: it lost its fighter in almost half the battles. My first fix (count every armed contact as a threat to the fighter) made results worse. Instead of dropping it I replayed the losses, and they showed two rules working against the fighter:
+
+- **Self-defense.** A damaged fighter turned for home with a hunter as fast as it is on its tail, and hold-fire stopped it shooting back at a hunter the threat model scored low. A contact that has hit one of blue's aircraft is now hostile whatever its score, the fighter fights it instead of running, and point defense may cover it. Alone this gets 0.815 and 91%.
+- **Pressing on.** With that fixed, the fighter won its duel, came out damaged, and sat over headquarters for a third of the remaining battle while jets and drones kept hitting sensors. Nothing is repaired there. A damaged fighter now starts no fight with an armed aircraft that has done nothing yet, but keeps attacking aircraft that cannot shoot back and aircraft already seen hitting a blue unit. Red aircraft shot down go from 1.90 to 2.54 per battle.
+
+Both were tuned on separate battles and then measured on these, and neither changes the 150-rollout table above (0.974, 0.11). Going one step further and treating a fighter that closes to two cells as hostile before it fires gets 0.832 and 94% here but shoots down more aircraft that never attacked (0.19 against 0.11), so it is not the default. Full table, with each lesson on its own: [`ml/OPPONENT.md`](ml/OPPONENT.md).
 
 **ROS 2.** The same observation and plan are also typed ROS 2 messages ([`ros2/`](ros2/README.md)): the simulator and the planner run as two separate nodes that talk over topics. CI builds both packages in the official ROS 2 Jazzy container, runs the two nodes, and checks from a third node that every plan on the topic is exactly what the planner gives for that observation and that the orders take effect.
 
@@ -155,7 +160,7 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 121 CLI checks and 36 planner checks
+npm test               # 121 CLI checks and 39 planner checks
 npm run trace          # every requirement still names a check that exists
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
@@ -181,7 +186,7 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
 - Sensor noise is drawn from a hash of the seed, tick, contact and sensor rather than a running generator, so a noisy run replays exactly and does not depend on how many times the world was read. With noise at 0 the tracker is skipped entirely and every earlier result is unchanged.
 - The planner keeps nothing between ticks. Everything it needs is in the observation, so the in-simulator copy and the edge node cannot drift apart, and a node that restarts is correct again on the next message. The observation never contains a contact's orders or target; the only hint of intent is which blue unit it has just hit, which blue can see for itself. Tests check both.
-- The planner's rules are pinned by 36 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off, goes home, or stays to fight the contact hunting it.
+- The planner's rules are pinned by 39 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off, goes home, or stays in the fight when damaged.
 - [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) records a code review of the first version: five bugs found, fixed, and covered by regression tests.
 
 ## Roadmap

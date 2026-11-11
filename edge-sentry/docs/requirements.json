@@ -546,11 +546,23 @@
   {
     "id": "ROE-03",
     "area": "Rules of engagement",
-    "text": "A damaged fighter that is not being hunted breaks off and returns to headquarters.",
+    "text": "A damaged fighter starts no fight with an armed aircraft that has done nothing yet, and returns to headquarters if that is all there is; it keeps attacking aircraft that cannot shoot back and aircraft already seen hitting a blue unit.",
     "tests": [
       [
         "native/tests/test_planner.py",
-        "a damaged fighter breaks off and returns to headquarters"
+        "a damaged fighter leaves an armed aircraft that has done nothing alone and returns to headquarters"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a damaged fighter still goes after a bomber, which cannot shoot back"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a damaged fighter still goes after an armed aircraft already seen hitting a blue unit"
+      ],
+      [
+        "ml/opponent_eval.py",
+        "a damaged fighter that stays in the battle shoots down more of red's aircraft"
       ]
     ]
   },
@@ -576,11 +588,11 @@
   {
     "id": "RED-02",
     "area": "Red opponent",
-    "text": "The coordinated doctrine is harder on a defended blue than the original script, and the planner still beats no defense against it.",
+    "text": "The coordinated doctrine was harder on the planner than the original script before the planner was taught to answer it, and the planner still beats no defense against it.",
     "tests": [
       [
         "ml/opponent_eval.py",
-        "the coordinated doctrine hurts a defended blue more than the original script"
+        "the coordinated doctrine hurt the planner more than the original script before it was taught"
       ],
       [
         "ml/opponent_eval.py",

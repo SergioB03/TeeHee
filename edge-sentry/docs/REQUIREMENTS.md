@@ -70,18 +70,18 @@ Each requirement names the automated checks that verify it. CI runs `tools/trace
 | --- | --- | --- | --- |
 | ROE-01 | Hold fire: a fighter does not shoot at a contact the threat model has not labelled watch or hostile; it may follow it. | hold fire: a contact below the watch line is shadowed, not shot at (`native/tests/test_planner.py`)<br>a fighter that is merely close and has not fired is not shot at (`native/tests/test_planner.py`) | `npm test` |
 | ROE-02 | Self-defense: a contact that has hit one of blue's aircraft may be shot at whatever its label, and a damaged fighter fights its hunter instead of running. | self-defense: a contact that has hit our fighter is shot at even below the watch line (`native/tests/test_planner.py`)<br>a damaged fighter does not turn and run from the contact hunting it: it fights (`native/tests/test_planner.py`)<br>self-defense keeps the fighter alive more often (`ml/opponent_eval.py`) | `npm run eval:opponent`, `npm test` |
-| ROE-03 | A damaged fighter that is not being hunted breaks off and returns to headquarters. | a damaged fighter breaks off and returns to headquarters (`native/tests/test_planner.py`) | `npm test` |
+| ROE-03 | A damaged fighter starts no fight with an armed aircraft that has done nothing yet, and returns to headquarters if that is all there is; it keeps attacking aircraft that cannot shoot back and aircraft already seen hitting a blue unit. | a damaged fighter leaves an armed aircraft that has done nothing alone and returns to headquarters (`native/tests/test_planner.py`)<br>a damaged fighter still goes after a bomber, which cannot shoot back (`native/tests/test_planner.py`)<br>a damaged fighter still goes after an armed aircraft already seen hitting a blue unit (`native/tests/test_planner.py`)<br>a damaged fighter that stays in the battle shoots down more of red's aircraft (`ml/opponent_eval.py`) | `npm run eval:opponent`, `npm test` |
 
 ## Red opponent
 
 | ID | Requirement | Verified by | Run with |
 | --- | --- | --- | --- |
 | RED-01 | Red orders only red units, and its coordinated strike arrives together and low. | red opponent never orders blue units (`native/tests/test_cli.py`)<br>under the coordinated doctrine at least three attackers land their first hit within three ticks of each other (`native/tests/test_cli.py`)<br>jets and drones come in at level 1 (`native/tests/test_cli.py`) | `npm test` |
-| RED-02 | The coordinated doctrine is harder on a defended blue than the original script, and the planner still beats no defense against it. | the coordinated doctrine hurts a defended blue more than the original script (`ml/opponent_eval.py`)<br>the planner still beats no defense against the coordinated doctrine (`ml/opponent_eval.py`) | `npm run eval:opponent` |
+| RED-02 | The coordinated doctrine was harder on the planner than the original script before the planner was taught to answer it, and the planner still beats no defense against it. | the coordinated doctrine hurt the planner more than the original script before it was taught (`ml/opponent_eval.py`)<br>the planner still beats no defense against the coordinated doctrine (`ml/opponent_eval.py`) | `npm run eval:opponent` |
 
 ## Coverage
 
-35 requirements, 86 links to checks.
+35 requirements, 89 links to checks.
 
 - `native/tests/test_cli.py`: 47 of 121 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.
-- `native/tests/test_planner.py`: 16 of 36 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.
+- `native/tests/test_planner.py`: 18 of 39 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.

@@ -30,7 +30,7 @@ void usage() {
       << "                                                doctrine times its strike to arrive together, comes in low, jams the\n"
       << "                                                command post and goes for blue's fighter; basic is the original script\n"
       << "  edge-sim --world <path> observe               the observation message blue's autonomy gets (no red orders or targets)\n"
-      << "  edge-sim --world <path> autopilot [--variant full|nolead|notimed|nopatrol|freefire|nodefense|closein|commit] [--dry-run]\n"
+      << "  edge-sim --world <path> autopilot [--variant full|nolead|notimed|nopatrol|freefire|nodefense|gohome|untaught|closein|commit] [--dry-run]\n"
       << "                                                run the autonomy planner for blue and give its orders\n"
       << "  edge-sim --world <path> sensing --noise F [--seed N] [--fusion on|off]\n"
       << "                                                0 = perfect picture (default); up to 1 = sensors miss contacts and\n"
@@ -304,7 +304,7 @@ int main(int argc, char** argv) {
     } else if (!doctrine.empty() && doctrine != "basic" && doctrine != "coordinated") {
       err = "bad --doctrine (expected coordinated or basic)";
     } else if (autopilot && !plannerConfigFromName(argValue(args, "--variant"), variant)) {
-      err = "bad --variant (expected full, nolead, notimed, nopatrol, freefire, nodefense, closein or commit)";
+      err = "bad --variant (expected full, nolead, notimed, nopatrol, freefire, nodefense, gohome, untaught, closein or commit)";
     } else {
       // Each order is logged on its own line, as actor "opponent" or
       // "autopilot", against the picture the plan was made on.

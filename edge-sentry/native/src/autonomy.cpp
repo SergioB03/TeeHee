@@ -152,6 +152,8 @@ bool plannerConfigFromName(const std::string& name, PlannerConfig& out) {
   else if (name == "nodefense") out.selfDefense = false;
   else if (name == "closein") out.huntMode = 2;
   else if (name == "commit") out.commit = true;
+  else if (name == "gohome") out.pressOn = false;
+  else if (name == "untaught") { out.selfDefense = false; out.pressOn = false; }
   else if (name.rfind("trust", 0) == 0) out.coverTrust = std::atof(name.c_str() + 5) / 100.0;  // trust50, trust100: tuning runs
   else return false;
   return true;
@@ -223,11 +225,14 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
     const int killTicks = static_cast<int>(std::ceil(kHitsToKill / (kPassHit * fp.hitFactor)));
     int pick = -1, pickReach = 0, px = 0, py = 0, pz = 0;
     double pickGain = kMinGain;
-    // A damaged fighter goes home, unless something is hunting it: a hunter
-    // as fast as it is cannot be outrun, so turning away only gets it shot.
+    // A damaged fighter stays out of new fights with armed aircraft, but not
+    // out of the battle: it still fights a contact hunting it (a hunter as
+    // fast as it is cannot be outrun), aircraft that cannot shoot back, and
+    // aircraft already seen attacking.
     bool hunted = false;
     for (size_t i = 0; i < n; ++i) hunted = hunted || prey[i] == f;
-    if (f->hp > kBingoHp || hunted) {
+    const bool hurt = f->hp <= kBingoHp;
+    if (!hurt || hunted || cfg.pressOn) {
       const double before = total(downAt);
       for (size_t i = 0; i < n; ++i) {
         const Contact& c = o.contacts[i];
@@ -240,7 +245,8 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
         double gain = before - total(trial);
         if (f->target == c.id) gain *= 1.15;  // a little loyalty to the current target, so it does not dither
         if (prey[i] == f) gain *= 1.5;        // the one shooting at this fighter comes first
-        else if (f->hp <= kBingoHp) continue; // damaged: fight only what is hunting it
+        else if (hurt && !(cfg.pressOn && (!profileByName(c.cls).airToAir || !c.hit.empty())))
+          continue;  // damaged: leave armed aircraft alone until they have shown what they are doing
         if (gain > pickGain) {
           pickGain = gain;
           pick = static_cast<int>(i);
