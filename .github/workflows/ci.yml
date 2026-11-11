@@ -90,36 +90,34 @@ jobs:
         run: python3 native/tests/test_planner.py /tmp/edge-node-arm64.sh
       - name: Software-in-the-loop with the arm64 node
         run: python3 sil/run_sil.py --rollouts 8 --budget-ms 250 --node-bin /tmp/edge-node-arm64.sh --label "an arm64 build under QEMU emulation" --check --no-write
+      - name: The planner's Docker image for arm64 (cross-compiled inside the image build)
+        run: |
+          docker build --platform linux/arm64 --target edge-node -t edge-sentry-node:arm64 .
+          test "$(docker image inspect edge-sentry-node:arm64 --format '{{.Architecture}}')" = arm64
+          id=$(docker create --platform linux/arm64 edge-sentry-node:arm64)
+          docker cp "$id":/edge-node /tmp/edge-node-image-arm64
+          docker rm "$id" > /dev/null
+          file /tmp/edge-node-image-arm64 | grep -q "ARM aarch64"
+          printf '#!/bin/sh\nexec qemu-aarch64-static /tmp/edge-node-image-arm64 "$@"\n' > /tmp/edge-node-image-arm64.sh
+          chmod +x /tmp/edge-node-image-arm64.sh
+      - name: Planner tests against the binary taken out of the arm64 image
+        run: python3 native/tests/test_planner.py /tmp/edge-node-image-arm64.sh
 
-  ros2:
-    name: ROS 2 bridge (Jazzy)
+  docker:
+    name: Docker images and compose
     runs-on: ubuntu-latest
-    container: ros:jazzy
-    defaults:
-      run:
-        shell: bash
-        working-directory: edge-sentry
-    env:
-      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
     steps:
       - uses: actions/checkout@v4
-      - name: Build the simulator and the planner
-        run: cmake -S native -B native/build && cmake --build native/build -j
-      - name: Build the ROS 2 message and bridge packages
-        run: |
-          source /opt/ros/jazzy/setup.bash
-          cd ros2 && colcon build --event-handlers console_direct+
-      - name: Messages are generated with the expected fields
-        run: |
-          source /opt/ros/jazzy/setup.bash && source ros2/install/setup.bash
-          ros2 interface show edge_sentry_msgs/msg/Observation > /tmp/observation.txt
-          ros2 interface show edge_sentry_msgs/msg/Plan > /tmp/plan.txt
-          grep -q "Contact\[\] contacts" /tmp/observation.txt
-          grep -q "Order\[\] orders" /tmp/plan.txt
-      - name: Simulator and autonomy as two ROS 2 nodes talking over topics
-        run: |
-          source /opt/ros/jazzy/setup.bash && source ros2/install/setup.bash
-          python3 ros2/check_bridge.py --sim "$PWD/native/build/edge-sim" --node "$PWD/native/build/edge-node"
+      - name: Build the console, planner and tools images, then run them (non-root, read-only, SIL across two containers)
+        run: python3 docker/check.py
+
+  ros2:
+    name: ROS 2 bridge (Jazzy, in its Docker image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the ROS 2 image, run the demo, and check the topics between the two nodes
+        run: python3 docker/check.py --ros2
 
   typecheck:
     name: TypeScript and agent project

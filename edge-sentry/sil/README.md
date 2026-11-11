@@ -4,7 +4,7 @@ The planner that runs blue's defense (`native/src/autonomy.cpp`) is built twice:
 
 - inside the simulator, as `edge-sim autopilot`
 - as `edge-node`, a small standalone program for a separate computer. It has no
-  simulator in it: only the planner and the message format (about 600 lines of
+  simulator in it: only the planner and the message format (about 800 lines of
   C++17, no libraries beyond the standard one and POSIX sockets).
 
 `run_sil.py` wires the two together. Each tick it asks the simulator for blue's
@@ -36,6 +36,14 @@ Results are in [`RESULTS.md`](RESULTS.md). What it checks:
 | No reply misses the tick budget on a direct link | The deadline is real: a late reply is thrown away |
 | Mission value with delay, jitter and lost messages | Degrades gradually; units keep their last orders |
 | With the link down, nothing from the node is used | A dead link behaves exactly like no autonomy, never worse |
+
+## In two containers
+
+```bash
+docker compose run --rm sil
+```
+
+The same harness with a real boundary between the two halves: the simulator in one container, the planner in another that is held to half a CPU core and 32 MB of memory, and only the network between them. See [`docker/`](../docker/README.md).
 
 ## On a Raspberry Pi or Jetson
 

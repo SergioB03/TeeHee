@@ -3,7 +3,7 @@
     ros2 launch edge_sentry_bridge demo.launch.py sim:=/path/to/edge-sim node:=/path/to/edge-node
 """
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -16,7 +16,9 @@ def generate_launch_description():
         DeclareLaunchArgument("ticks", default_value="0", description="stop after this many ticks; 0 runs until stopped"),
         Node(package="edge_sentry_bridge", executable="autonomy_node", output="screen",
              parameters=[{"node": LaunchConfiguration("node")}]),
+        # When the simulator has played its ticks, stop the autonomy node too and end the launch.
         Node(package="edge_sentry_bridge", executable="sim_node", output="screen",
+             on_exit=Shutdown(reason="the simulation finished"),
              parameters=[{"sim": LaunchConfiguration("sim"), "period": LaunchConfiguration("period"),
                           "ticks": LaunchConfiguration("ticks")}]),
     ])

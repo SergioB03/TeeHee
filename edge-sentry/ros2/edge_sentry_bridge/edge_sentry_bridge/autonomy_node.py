@@ -9,6 +9,7 @@ import json
 import subprocess
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 from edge_sentry_msgs.msg import Observation, Plan
@@ -38,7 +39,10 @@ class AutonomyNode(Node):
             data = json.loads(reply)
         except ValueError:
             data = {"ok": False}
-        self.publisher.publish(plan_from_wire(data, self.get_clock().now().to_msg(), msg.tick))
+        plan = plan_from_wire(data, self.get_clock().now().to_msg(), msg.tick)
+        self.publisher.publish(plan)
+        for order in plan.orders:
+            self.get_logger().info(f"tick {msg.tick}: {order.id} {order.mode}: {order.reason}")
 
     def destroy_node(self):
         self.planner.terminate()
@@ -50,7 +54,7 @@ def main():
     node = AutonomyNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

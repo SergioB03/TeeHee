@@ -172,8 +172,46 @@ try:
     stream.flush()
     check("after a client disconnects the node accepts the next one", json.loads(stream.readline())["ok"] is True)
     conn.close()
+
+    # Several connections at once: a health probe or a second console must not wait for the first to leave.
+    first = socket.create_connection(("127.0.0.1", port), timeout=3)
+    second = socket.create_connection(("127.0.0.1", port), timeout=3)
+    one, two = first.makefile("rw"), second.makefile("rw")
+
+    def ask(stream, text):
+        stream.write(text + "\n")
+        stream.flush()
+        return json.loads(stream.readline())
+
+    pong = ask(two, '{"ping":1}')
+    obs["tick"] = 9
+    late = ask(one, json.dumps(obs))
+    check("a second client is answered while the first stays connected", pong.get("pong") == 1 and late["tick"] == 9 and late["ok"])
+    check("--ping reports a live node, even while other clients are connected",
+          subprocess.run([NODE, "--ping", "127.0.0.1:%d" % port]).returncode == 0)
+    one.write('{"v":1,"tick":10')  # half a message, no newline yet
+    one.flush()
+    check("a client that has sent half a message does not hold up another", ask(two, '{"ping":1}').get("pong") == 1)
+    one.write(',"width":12,"height":12,"ceiling":5,"watchAt":0.24,"own":[],"contacts":[]}\n')
+    one.flush()
+    check("and its own message is answered once the rest of it arrives", json.loads(one.readline())["tick"] == 10)
+    crowd = [socket.create_connection(("127.0.0.1", port), timeout=3) for _ in range(40)]
+    time.sleep(0.3)
+    check("with more connections than it will hold, the node turns the extra away and keeps serving",
+          ask(two, '{"ping":1}').get("pong") == 1 and ask(one, json.dumps(obs))["ok"])
+    for c in crowd + [first, second]:
+        c.close()
 finally:
     node.terminate()
+    try:
+        stopped = node.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        node.kill()
+        stopped = None
+check("asked to terminate, the node stops at once with status 0", stopped == 0)
+check("--ping reports failure when nothing is listening", subprocess.run([NODE, "--ping", "127.0.0.1:%d" % port]).returncode == 1)
+check("--ping refuses an address it cannot read",
+      subprocess.run([NODE, "--ping", "nonsense"], stderr=subprocess.DEVNULL).returncode == 2)
 
 print()
 if failures:
