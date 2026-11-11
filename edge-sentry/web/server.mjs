@@ -430,6 +430,19 @@ const server = createServer(async (req, res) => {
   }
 });
 
+// Stop cleanly when asked (docker stop, Ctrl-C): finish the request in hand,
+// then exit 0. As the first process in a container Node does not get the
+// default "terminate" action for these signals, so without this a stop
+// request is ignored until the container is killed.
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    server.close(() => process.exit(0));
+    server.closeIdleConnections?.();
+    // A simulator command takes milliseconds; anything still open after a second is an idle client.
+    setTimeout(() => { server.closeAllConnections?.(); process.exit(0); }, 1000).unref();
+  });
+}
+
 await mkdir(path.dirname(DEFAULT_WORLD), { recursive: true });
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`edge-sentry phone console on http://localhost:${PORT}`);

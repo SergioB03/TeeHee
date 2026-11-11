@@ -220,9 +220,18 @@ try:
     check("eight ticks sent at once in one session all count, exactly once each",
           all(code == 200 for code, _ in replies) and call(sid, "/api/state")[1]["world"]["tick"] == 8)
     check("no request got a server error", all(code < 500 for code in statuses))
+
+    # A stop request (docker stop, Ctrl-C) ends the server at once and cleanly.
+    server.terminate()
+    try:
+        stopped = server.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        stopped = None
+    check("asked to terminate, the server stops at once with status 0", stopped == 0)
     print(f"\n{len(visitors)} visitors in parallel, {len(statuses)} requests")
 finally:
-    server.terminate()
+    if server.poll() is None:
+        server.kill()
 
 if failures:
     print("%d check(s) FAILED" % len(failures))

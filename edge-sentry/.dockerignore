@@ -1,0 +1,19 @@
+# Keep the build context small and keep local state out of images.
+.git
+**/node_modules
+**/__pycache__
+**/*.pyc
+native/build
+ros2/build
+ros2/install
+ros2/log
+**/world.json
+**/*.decisions.jsonl
+**/*.game.json
+**/*.auto.json
+docs/*.gif
+.env
+.env.*
+.agent-serve
+memory
+ml/rl_runs

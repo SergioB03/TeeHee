@@ -57,27 +57,53 @@ def v1_score(features):
 
 
 class Sim:
-    """Thin wrapper over the edge-sim CLI with its own world file."""
+    """Thin wrapper over edge-sim with its own world.
 
-    def __init__(self, binary=None, scorer=None, log=False):
+    By default every command is one edge-sim process and the world is a file,
+    exactly as on the command line. With fast=True one `edge-sim serve`
+    process keeps the world in memory and takes commands on a pipe: the same
+    commands and byte-for-byte the same replies, about a hundred times
+    quicker, for training loops and bulk rollouts. The decision log needs a
+    world file, so it is only available in the default mode.
+    """
+
+    def __init__(self, binary=None, scorer=None, log=False, fast=False):
         self.binary = binary or os.environ.get("EDGE_SIM") or DEFAULT_SIM
         if not os.path.exists(self.binary):
             raise SystemExit(f"edge-sim not found at {self.binary}. Build it with: npm run build:native")
-        self.dir = tempfile.mkdtemp(prefix="edge-ml-")
-        self.world = os.path.join(self.dir, "world.json")
         self.scorer = scorer
         self.log = log
         # Sensing for worlds this wrapper loads: 0 = perfect picture. See `edge-sim sensing`.
         self.noise = 0.0
         self.seed = 0
         self.fusion = True
+        self.proc = None
+        if fast:
+            if log:
+                raise ValueError("the decision log needs a world file: use fast=False with log=True")
+            cmd = [self.binary, "serve"] + (["--scorer", scorer] if scorer else [])
+            self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+        else:
+            self.dir = tempfile.mkdtemp(prefix="edge-ml-")
+            self.world = os.path.join(self.dir, "world.json")
 
-    def run(self, *args):
-        # --no-log: bulk rollouts would otherwise fill the decision log.
-        cmd = [self.binary, "--world", self.world] + ([] if self.log else ["--no-log"])
-        if self.scorer:
-            cmd += ["--scorer", self.scorer]
-        out = subprocess.run(cmd + [str(a) for a in args], capture_output=True, text=True).stdout
+    def _ask(self, words):
+        """One line to the served simulator, one line back. Tabs separate the words, so none may contain one."""
+        self.proc.stdin.write("\t".join(str(w).replace("\t", " ").replace("\n", " ") for w in words) + "\n")
+        self.proc.stdin.flush()
+        return self.proc.stdout.readline()
+
+    def run(self, *args, world=True):
+        """Run one command and return its reply. world=False leaves the world out of the reply (quicker)."""
+        extra = [] if world else ["--no-world"]
+        if self.proc:
+            out = self._ask(list(args) + extra)
+        else:
+            # --no-log: bulk rollouts would otherwise fill the decision log.
+            cmd = [self.binary, "--world", self.world] + ([] if self.log else ["--no-log"])
+            if self.scorer:
+                cmd += ["--scorer", self.scorer]
+            out = subprocess.run(cmd + [str(a) for a in args] + extra, capture_output=True, text=True).stdout
         try:
             return json.loads(out)
         except ValueError:
@@ -87,9 +113,29 @@ class Sim:
         """Start from a hand-built unit list instead of the default scenario."""
         world = {"tick": 0, "width": 12, "height": 12, "noise": self.noise, "seed": self.seed,
                  "fusion": 1 if self.fusion else 0, "units": units, "tracks": [], "events": [], "cover": []}
-        with open(self.world, "w") as f:
-            json.dump(world, f, separators=(",", ":"))
+        text = json.dumps(world, separators=(",", ":"))
+        if self.proc:
+            self._ask(["load", text])
+        else:
+            with open(self.world, "w") as f:
+                f.write(text)
         return self.run("status")
+
+    def close(self):
+        """Stop the served simulator, if there is one."""
+        if self.proc and self.proc.poll() is None:
+            try:
+                self.proc.stdin.close()
+                self.proc.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                self.proc.kill()
+        self.proc = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:  # interpreter shutdown: nothing useful to do
+            pass
 
 
 # Highest altitude level each aircraft type can reach (profileOf() in native/src/world.cpp).
@@ -226,6 +272,32 @@ def fighter_scenario(seed):
             break
     units.append(unit("B-F1", "stealth", "blue", cell[0], cell[1]))
     return units, orders
+
+
+def battle_scenario(seed):
+    """Both sides present and nobody has orders: blue has headquarters, three sensors or relays and a stealth
+    fighter; red has a jammer and four to six attackers. Whoever flies each side gives the orders."""
+    rng = random.Random(seed)
+    taken = set()
+
+    def cell(x_lo, x_hi):
+        while True:
+            c = (rng.randint(x_lo, x_hi), rng.randrange(12))
+            if c not in taken:
+                taken.add(c)
+                return c
+
+    units = [unit("B-HQ", "hq", "blue", *cell(0, 3))]
+    for i in range(3):
+        kind = rng.choice(["sensor", "sensor", "relay"])
+        units.append(unit(f"B-{'S' if kind == 'sensor' else 'R'}{i + 1}", kind, "blue", *cell(0, 5)))
+    units.append(unit("B-F1", "stealth", "blue", *cell(0, 5)))
+    units.append(unit("R-J1", "jammer", "red", *cell(6, 11)))
+    prefix = {"jet": "JET", "stealth": "F", "bomber": "BMR", "drone": "DRN", "missile": "MSL"}
+    kinds = ["missile", "jet"] + [rng.choice(["jet", "stealth", "bomber", "drone", "missile"]) for _ in range(rng.randint(2, 4))]
+    for i, kind in enumerate(kinds):
+        units.append(unit(f"R-{prefix[kind]}{i + 1}", kind, "red", *cell(7, 11)))
+    return units
 
 
 def rollout(sim, units, orders, ticks=TICKS):

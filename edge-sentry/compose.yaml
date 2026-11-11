@@ -1,0 +1,92 @@
+# Run edge-sentry with Docker. From this folder:
+#
+#   docker compose up                        the web console on http://localhost:3100 and the
+#                                            planner node on 127.0.0.1:7700 (this machine only)
+#   docker compose run --rm sil              software-in-the-loop: the simulator in one container,
+#                                            the planner in another, talking over the network
+#   docker compose --profile ros2 up ros2    the ROS 2 demo, with no ROS on your machine
+#   docker compose run --rm train            train the learned policy (uses an NVIDIA GPU if it can)
+#   docker compose down                      stop; add -v to also delete the saved worlds
+#
+# Every service runs as a non-root user with all Linux capabilities dropped,
+# and all but the ROS 2 demo on a read-only filesystem. docker/README.md has the details.
+name: edge-sentry
+
+x-locked-down: &locked-down
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  console:
+    <<: *locked-down
+    build: { context: ., target: console }
+    image: edge-sentry-console
+    ports: ["${CONSOLE_PORT:-3100}:3100"]
+    volumes: ["worlds:/data"]   # each visitor's world and game; survives a rebuild
+    tmpfs: ["/tmp"]
+
+  edge-node:
+    <<: *locked-down
+    build: { context: ., target: edge-node }
+    image: edge-sentry-node
+    ports: ["127.0.0.1:${NODE_PORT:-7700}:7700"]   # no authentication, so not offered to the network
+    # Held to what a small computer has: half a CPU core, 32 MB of memory, a handful of processes.
+    cpus: 0.5
+    mem_limit: 32m
+    pids_limit: 8
+
+  sil:
+    <<: *locked-down
+    profiles: [sil]
+    build: { context: ., target: tools }
+    image: edge-sentry-tools
+    depends_on:
+      edge-node: { condition: service_healthy }
+    tmpfs: ["/tmp"]
+    command:
+      - python3
+      - sil/run_sil.py
+      - --node
+      - edge-node:7700
+      - --rollouts
+      - "12"
+      - --check
+      - --no-write
+      - --label
+      - a separate container held to half a CPU core and 32 MB of memory
+
+  # Train the learned policy. The weights are written into ./ml, so they land in your checkout.
+  #   docker compose run --rm train                          on an NVIDIA GPU
+  #   docker compose run --rm train-cpu                      on a machine without one
+  #   docker compose run --rm train python3 ml/rl_eval.py    compare the result with the planner
+  train: &train
+    profiles: [train]
+    build: { context: ., target: train }
+    image: edge-sentry-train
+    user: "${UID:-1000}:${GID:-1000}"   # so the weights it writes belong to you, not to root
+    environment: { HOME: /tmp }
+    volumes: ["./ml:/app/ml"]
+    tmpfs: ["/tmp"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: [python3, ml/rl_train.py]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  train-cpu:
+    <<: *train
+    deploy: {}
+
+  ros2:
+    profiles: [ros2]
+    build: { context: ., dockerfile: ros2/Dockerfile }
+    image: edge-sentry-ros2
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  worlds: {}

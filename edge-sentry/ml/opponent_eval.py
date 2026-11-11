@@ -28,28 +28,7 @@ TICKS = 22
 AIRCRAFT = {"jet", "stealth", "bomber", "drone", "missile"}
 
 
-def battle(seed):
-    rng = random.Random(seed)
-    taken = set()
-
-    def cell(x_lo, x_hi):
-        while True:
-            c = (rng.randint(x_lo, x_hi), rng.randrange(12))
-            if c not in taken:
-                taken.add(c)
-                return c
-
-    units = [simlab.unit("B-HQ", "hq", "blue", *cell(0, 3))]
-    for i in range(3):
-        kind = rng.choice(["sensor", "sensor", "relay"])
-        units.append(simlab.unit(f"B-{'S' if kind == 'sensor' else 'R'}{i + 1}", kind, "blue", *cell(0, 5)))
-    units.append(simlab.unit("B-F1", "stealth", "blue", *cell(0, 5)))
-    units.append(simlab.unit("R-J1", "jammer", "red", *cell(6, 11)))
-    prefix = {"jet": "JET", "stealth": "F", "bomber": "BMR", "drone": "DRN", "missile": "MSL"}
-    kinds = ["missile", "jet"] + [rng.choice(["jet", "stealth", "bomber", "drone", "missile"]) for _ in range(rng.randint(2, 4))]
-    for i, kind in enumerate(kinds):
-        units.append(simlab.unit(f"R-{prefix[kind]}{i + 1}", kind, "red", *cell(7, 11)))
-    return units
+battle = simlab.battle_scenario  # the generator lives in simlab so the training code draws from the same one
 
 
 def play(sim, units, doctrine, defend, variant="full"):

@@ -9,11 +9,12 @@ import json
 import subprocess
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 from edge_sentry_msgs.msg import Observation, Plan
 
-from .wire import observation_to_wire, plan_from_wire
+from .wire import KEPT, observation_to_wire, plan_from_wire
 
 
 class AutonomyNode(Node):
@@ -26,7 +27,7 @@ class AutonomyNode(Node):
                                         stdout=subprocess.PIPE, text=True, bufsize=1)
         # Subscribe first: the simulator starts once it sees this node's publisher.
         self.create_subscription(Observation, "edge_sentry/observation", self.on_observation, 10)
-        self.publisher = self.create_publisher(Plan, "edge_sentry/plan", 10)
+        self.publisher = self.create_publisher(Plan, "edge_sentry/plan", KEPT)
 
     def on_observation(self, msg):
         if self.publisher is None:
@@ -38,7 +39,10 @@ class AutonomyNode(Node):
             data = json.loads(reply)
         except ValueError:
             data = {"ok": False}
-        self.publisher.publish(plan_from_wire(data, self.get_clock().now().to_msg(), msg.tick))
+        plan = plan_from_wire(data, self.get_clock().now().to_msg(), msg.tick)
+        self.publisher.publish(plan)
+        for order in plan.orders:
+            self.get_logger().info(f"tick {msg.tick}: {order.id} {order.mode}: {order.reason}")
 
     def destroy_node(self):
         self.planner.terminate()
@@ -50,7 +54,7 @@ def main():
     node = AutonomyNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

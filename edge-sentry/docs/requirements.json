@@ -372,7 +372,7 @@
   {
     "id": "IF-03",
     "area": "Autonomy interface",
-    "text": "The node answers one plan per observation, in order, and accepts a new client after one disconnects.",
+    "text": "The node answers one plan per observation, in order, serves several connections at once, and accepts a new client after one disconnects.",
     "tests": [
       [
         "native/tests/test_planner.py",
@@ -381,6 +381,14 @@
       [
         "native/tests/test_planner.py",
         "after a client disconnects the node accepts the next one"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a second client is answered while the first stays connected"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a client that has sent half a message does not hold up another"
       ]
     ]
   },
@@ -666,6 +674,197 @@
       [
         "web/test_sessions.py",
         "eight ticks sent at once in one session all count, exactly once each"
+      ]
+    ]
+  },
+  {
+    "id": "CON-01",
+    "area": "Containers",
+    "text": "One Dockerfile builds the console, the planner and the test tools. The planner image holds a single statically linked file and nothing else.",
+    "tests": [
+      [
+        "docker/check.py",
+        "the console, planner and tools images build"
+      ],
+      [
+        "docker/check.py",
+        "the planner image holds one file, the planner, and it is under 5 MB"
+      ],
+      [
+        "docker/check.py",
+        "the simulator's and the planner's own test suites pass inside the tools image"
+      ]
+    ]
+  },
+  {
+    "id": "CON-02",
+    "area": "Containers",
+    "text": "Containers run as a non-root user with no Linux capabilities on a read-only filesystem; the console can write only to its data volume, and saved worlds outlive the container.",
+    "tests": [
+      [
+        "docker/check.py",
+        "no image runs as root"
+      ],
+      [
+        "docker/check.py",
+        "each container runs as a non-root user with no capabilities, on a read-only filesystem"
+      ],
+      [
+        "docker/check.py",
+        "the console can write to its data volume and nowhere else in its image"
+      ],
+      [
+        "docker/check.py",
+        "worlds survive the console container being replaced"
+      ]
+    ]
+  },
+  {
+    "id": "CON-03",
+    "area": "Containers",
+    "text": "With the simulator in one container and the planner in another, held to half a CPU core and 32 MB, software-in-the-loop still passes: same orders as the in-simulator planner and no reply over the tick budget.",
+    "tests": [
+      [
+        "docker/check.py",
+        "software-in-the-loop passes with the simulator and the planner in separate containers"
+      ],
+      [
+        "docker/check.py",
+        "the planner container is held to half a CPU core and 32 MB of memory"
+      ],
+      [
+        "docker/check.py",
+        "the planner answers on its published port, which is open to this machine only"
+      ]
+    ]
+  },
+  {
+    "id": "CON-04",
+    "area": "Containers",
+    "text": "A container can tell whether it is healthy and stops at once when asked: the planner checks itself with --ping, and both programs exit with status 0 on a stop request.",
+    "tests": [
+      [
+        "docker/check.py",
+        "the console and the planner start and report healthy"
+      ],
+      [
+        "docker/check.py",
+        "asked to stop, both containers exit within three seconds with status 0"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "--ping reports a live node, even while other clients are connected"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "asked to terminate, the node stops at once with status 0"
+      ],
+      [
+        "web/test_sessions.py",
+        "asked to terminate, the server stops at once with status 0"
+      ]
+    ]
+  },
+  {
+    "id": "CON-05",
+    "area": "Containers",
+    "text": "The ROS 2 bridge runs from an image with no ROS installed on the host: the demo plays its ticks and stops, and the bridge check passes inside the image.",
+    "tests": [
+      [
+        "docker/check.py",
+        "the ROS 2 image builds"
+      ],
+      [
+        "docker/check.py",
+        "the ROS 2 demo plays its ticks over the topics and then stops by itself"
+      ],
+      [
+        "docker/check.py",
+        "the bridge check passes inside the ROS 2 image"
+      ]
+    ]
+  },
+  {
+    "id": "RL-01",
+    "area": "Learned policy",
+    "text": "The learned policy is given the same observation message as the planner and nothing else, and its reward is the mission value every evaluation reports.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "observe reports blue's mission value beside the observation, not inside it"
+      ],
+      [
+        "ml/test_rl.py",
+        "the reward adds up to the mission value the evaluations report"
+      ],
+      [
+        "ml/test_rl.py",
+        "every picture has the declared number of inputs"
+      ]
+    ]
+  },
+  {
+    "id": "RL-02",
+    "area": "Learned policy",
+    "text": "Hold fire is enforced on the learned policy as a mask on its choices: a shot at a contact below the watch line is never offered unless that contact has hit one of blue's aircraft, and the orders it gives are checked against the rule from outside.",
+    "tests": [
+      [
+        "ml/test_rl.py",
+        "hold fire: the fighter is not offered a contact scored below the watch line"
+      ],
+      [
+        "ml/test_rl.py",
+        "self-defense: a contact that has hit one of blue's aircraft is offered whatever its score"
+      ],
+      [
+        "ml/test_rl.py",
+        "in every picture from real games, the masks follow the same rules"
+      ],
+      [
+        "ml/test_rl.py",
+        "the shipped policy only ever picks a choice the rules offer"
+      ],
+      [
+        "ml/rl_eval.py",
+        "no order to shoot breaks the hold-fire rule"
+      ]
+    ]
+  },
+  {
+    "id": "RL-03",
+    "area": "Learned policy",
+    "text": "Training is reproducible and runs on the simulator itself: the served simulator gives the same game as the command line, and the same seeds and choices give the same games.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "a served rollout matches the command line, apart from rounding in the last digits"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "served and command-line rollouts give the same orders and the same events"
+      ],
+      [
+        "ml/test_rl.py",
+        "the same seeds and the same choices give the same games, tick for tick"
+      ]
+    ]
+  },
+  {
+    "id": "RL-04",
+    "area": "Learned policy",
+    "text": "The shipped policy is worth having: it beats no defense on games it never trained on and covers at least half the distance to the planner.",
+    "tests": [
+      [
+        "ml/rl_eval.py",
+        "the learned policy beats no defense on the scripted rollouts"
+      ],
+      [
+        "ml/rl_eval.py",
+        "the learned policy beats no defense against red's doctrine"
+      ],
+      [
+        "ml/rl_eval.py",
+        "the learned policy covers at least half the distance from no defense to the planner"
       ]
     ]
   }
