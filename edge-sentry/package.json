@@ -14,7 +14,8 @@
     "eval:outcome": "python3 ml/outcome.py --rollouts 40 --check --no-write",
     "eval:autonomy": "python3 ml/autonomy_eval.py --rollouts 30 --check --no-write",
     "sil": "python3 sil/run_sil.py --rollouts 12 --check --no-write",
-    "eval:tracking": "python3 ml/tracking_eval.py --rollouts 20 --check --no-write"
+    "eval:tracking": "python3 ml/tracking_eval.py --rollouts 20 --check --no-write",
+    "eval:opponent": "python3 ml/opponent_eval.py --rollouts 20 --check --no-write"
   },
   "dependencies": {
     "@grok/agent-sdk": "^0.6.0",

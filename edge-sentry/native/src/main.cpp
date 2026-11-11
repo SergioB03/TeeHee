@@ -25,7 +25,10 @@ void usage() {
       << "      altitude levels run 0 (ground) to 5; aircraft types differ in speed, climb, ceiling and signature\n"
       << "  edge-sim --world <path> decisions [--n N]     last N entries of the decision log (default 20)\n"
       << "  edge-sim --world <path> reset --scenario skirmish   larger setup with no orders, used by play mode\n"
-      << "  edge-sim --world <path> opponent --side <red|blue>  let the computer give that side's orders for this tick\n"
+      << "  edge-sim --world <path> opponent --side <red|blue> [--doctrine coordinated|basic]\n"
+      << "                                                let the computer give that side's orders for this tick. Red's default\n"
+      << "                                                doctrine times its strike to arrive together, comes in low, jams the\n"
+      << "                                                command post and goes for blue's fighter; basic is the original script\n"
       << "  edge-sim --world <path> observe               the observation message blue's autonomy gets (no red orders or targets)\n"
       << "  edge-sim --world <path> autopilot [--variant full|nolead|notimed|nopatrol|freefire] [--dry-run]\n"
       << "                                                run the autonomy planner for blue and give its orders\n"
@@ -84,7 +87,7 @@ bool isCommand(const std::string& a) {
 
 Args parseArgs(const std::vector<std::string>& raw) {
   static const std::set<std::string> kTakesValue = {
-      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side", "--variant", "--noise", "--seed", "--fusion",
+      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side", "--variant", "--noise", "--seed", "--fusion", "--doctrine",
       "--x",     "--y",      "--z",     "--id",     "--action", "--tx",   "--ty",   "--tz",       "--target"};
   Args out;
   for (size_t i = 0; i < raw.size(); ++i) {
@@ -294,8 +297,12 @@ int main(int argc, char** argv) {
     Team side = Team::Blue;
     PlannerConfig variant;
     const bool autopilot = cmd == "autopilot";
+    const std::string doctrine = argValue(args, "--doctrine");
+    World::redCoordinated = doctrine != "basic";
     if (!autopilot && (!teamFromString(argValue(args, "--side"), side) || side == Team::Unknown)) {
       err = "bad --side (expected red or blue)";
+    } else if (!doctrine.empty() && doctrine != "basic" && doctrine != "coordinated") {
+      err = "bad --doctrine (expected coordinated or basic)";
     } else if (autopilot && !plannerConfigFromName(argValue(args, "--variant"), variant)) {
       err = "bad --variant (expected full, nolead, notimed, nopatrol or freefire)";
     } else {

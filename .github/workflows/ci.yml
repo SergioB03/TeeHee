@@ -30,6 +30,8 @@ jobs:
         run: npm run eval:outcome
       - name: Autonomy planner evaluation (quick version)
         run: npm run eval:autonomy
+      - name: Red opponent evaluation (quick version)
+        run: npm run eval:opponent
       - name: Sensing and tracker evaluation (quick version)
         run: npm run eval:tracking
       - name: Software-in-the-loop (simulator plus a separate edge-node over TCP)
@@ -55,6 +57,9 @@ jobs:
           curl -sf -X POST -H "$J" -H "$S" -d '{"n":20}' $B/api/tick | grep -q '"over":true'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$J" -H "$S" -d '{"n":1}' $B/api/tick)" = 400
           curl -sf $B/api/state | grep -q '"game":null'
+          curl -sf -H 'x-session: cismoke000002' $B/api/state | grep -q '"auto":{"red":true,"blue":false}'
+          curl -sf -X POST -H "$J" -H 'x-session: cismoke000002' -d '{"n":2}' $B/api/tick | grep -q '"opponentOrders":\[{'
+          curl -sf -X POST -H "$J" -H 'x-session: cismoke000002' -d '{"red":false,"blue":true}' $B/api/auto | grep -q '"auto":{"red":false,"blue":true}'
           curl -sf -X POST -H "$J" -H "$S" -d '{"side":"blue"}' $B/api/game/start | grep -q '"autopilot":false'
           curl -sf -X POST -H "$J" -H "$S" -d '{"on":true}' $B/api/game/autopilot | grep -q '"autopilot":true'
           curl -sf -X POST -H "$J" -H "$S" -d '{"n":5}' $B/api/tick | grep -q '"autopilotOrders":\[{'

@@ -103,6 +103,7 @@ button.go { background: var(--ink); color: var(--paper); border-color: var(--ink
 .viewbar .seg button { flex: 1; border-radius: 0; margin-left: -1px; }
 .viewbar .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
 .viewbar .seg button:last-child { border-radius: 0 6px 6px 0; }
+#autoRed[aria-pressed="true"], #autoBlue[aria-pressed="true"], #autopilot[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .viewbar .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .viewbar .turn { min-width: 44px; padding: 0 10px; }
 .grid line { stroke: var(--line); stroke-width: 0.6; }
@@ -198,7 +199,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 .key { margin: 12px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
 
 .clock {
-  position: fixed; left: 0; right: 0; bottom: 0;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;  /* above the list bars that scroll under it */
   background: var(--paper); border-top: 1px solid var(--ink);
   padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
 }
@@ -294,6 +295,12 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
         <button class="blue" id="playBlue" type="button">Play as blue</button>
         <button class="red" id="playRed" type="button">Play as red</button>
       </div>
+      <p class="enemy">In the free sandbox, choose who the computer flies. A side it does not fly only moves when you order it.</p>
+      <div class="sides">
+        <button id="autoRed" type="button" aria-pressed="false">Red AI: off</button>
+        <button id="autoBlue" type="button" aria-pressed="false">Blue autopilot: off</button>
+      </div>
+      <p class="enemy" id="sandboxMoves" aria-live="polite" hidden></p>
     </div>
     <div id="modeGame" hidden>
       <p class="status" id="gameStatus"></p>
@@ -442,6 +449,7 @@ let decisions = [];
 let game = null;          // { side, tick, limit, over, missionValue, hits, blocked, lost } while a game is on
 let enemyOrders = [];     // what the computer opponent ordered on the last advance
 let autoOrders = [];      // what the autonomy planner ordered for blue on the last advance
+let auto = { red: false, blue: false };  // who the computer flies in the free sandbox
 let view = "3d";          // "2d" flat map or "3d" battlefield
 let yaw = -0.55;          // 3D view rotation about the vertical axis, radians
 try {
@@ -506,6 +514,7 @@ async function api(path, body) {
     if ("game" in data) game = data.game;
     if (data.opponentOrders) enemyOrders = data.opponentOrders;
     if (data.autopilotOrders) autoOrders = data.autopilotOrders;
+    if (data.auto) auto = data.auto;
     loadDecisions();
     return true;
   } catch {
@@ -1035,6 +1044,15 @@ function renderLists() {
 
 function renderGame() {
   $("modeIdle").hidden = !!game;
+  for (const [id, on, label] of [["autoRed", auto.red, "Red AI"], ["autoBlue", auto.blue, "Blue autopilot"]]) {
+    $(id).setAttribute("aria-pressed", String(on));
+    $(id).textContent = `${label}: ${on ? "on" : "off"}`;
+  }
+  const said = [];
+  if (auto.red && enemyOrders.length) said.push(`Red ordered: ${enemyOrders.map((o) => `${o.id} ${o.action}${o.target ? " " + o.target : ""}`).join("; ")}`);
+  if (auto.blue && autoOrders.length) said.push(`Autonomy ordered: ${autoOrders.map((o) => `${o.id} ${o.reason.split(";")[0]}`).join("; ")}`);
+  $("sandboxMoves").hidden = !!game || !said.length;
+  $("sandboxMoves").textContent = said.join(". ") + (said.length ? "." : "");
   $("modeGame").hidden = !game;
   $("addUnit").hidden = !!game;
   $("sensors").hidden = !!game;
@@ -1054,10 +1072,10 @@ function renderGame() {
     return `${what} (${o.reason})`;
   });
   // Autopilot: the autonomy planner runs blue's point defense and fighter each tick.
-  const auto = $("autopilot");
-  auto.hidden = you !== "blue" || game.over;
-  auto.setAttribute("aria-pressed", String(game.autopilot));
-  auto.textContent = game.autopilot ? "Autopilot: on" : "Autopilot: off";
+  const pilot = $("autopilot");
+  pilot.hidden = you !== "blue" || game.over;
+  pilot.setAttribute("aria-pressed", String(game.autopilot));
+  pilot.textContent = game.autopilot ? "Autopilot: on" : "Autopilot: off";
   const flown = autoOrders.map((o) => `${o.id} ${o.reason.split(";")[0]}`);
   $("autoMoves").hidden = !game.autopilot || game.over || game.tick === 0;
   $("autoMoves").textContent = flown.length ? `Autonomy ordered: ${flown.join("; ")}.` : "Autonomy kept its orders.";
@@ -1151,6 +1169,8 @@ async function startGame(side) {
 $("playBlue").onclick = () => startGame("blue");
 $("playRed").onclick = () => startGame("red");
 $("again").onclick = () => game && startGame(game.side);
+$("autoRed").onclick = () => api("/api/auto", { red: !auto.red });
+$("autoBlue").onclick = () => api("/api/auto", { blue: !auto.blue });
 $("autopilot").onclick = () => game && api("/api/game/autopilot", { on: !game.autopilot });
 $("switchSides").onclick = () => game && startGame(game.side === "blue" ? "red" : "blue");
 $("leaveGame").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; autoOrders = []; await api("/api/game/end", {}); };

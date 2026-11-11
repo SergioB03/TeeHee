@@ -183,6 +183,7 @@ World World::defaultScenario() {
 }
 
 ScorerKind World::activeScorer = ScorerKind::Learned;
+bool World::redCoordinated = true;
 
 World World::skirmishScenario() {
   World w = defaultScenario();
@@ -253,6 +254,121 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
       m.tz = p.tz;
       m.targetId = p.target;
       m.reason = p.reason;
+      moves.push_back(m);
+    }
+    return moves;
+  }
+
+  if (redCoordinated) {
+    // Red's doctrine, built to beat a defender who can stop only one hit per
+    // tick and shoot down one aircraft at a time:
+    //   1. Arrive together. Every attacker works out how long its run takes;
+    //      the faster ones hold until the slowest is the same distance out.
+    //   2. Come in low. Jets, drones and the stealth fighter wait and attack at
+    //      level 1, where cover hides them and locks are hard to get.
+    //   3. Jam the command post. The jammer goes for headquarters, where point
+    //      defense lives, and the strike gives it a few ticks to get there.
+    //   4. Clear the air. The stealth fighter goes for blue's fighter first.
+    //   5. Spread out. Missiles and bombers take headquarters; the rest take
+    //      different sensors and relays.
+    // It uses only what red would know: its own units, where blue's ground
+    // assets are, and where blue's aircraft are now.
+    std::vector<const Unit*> ground;
+    const Unit* hq = nullptr;
+    const Unit* blueFighter = nullptr;
+    for (const auto& b : units) {
+      if (!b.alive || b.team != Team::Blue) continue;
+      if (isAircraft(b.type)) {
+        if (!blueFighter && (b.type == UnitType::Jet || b.type == UnitType::Stealth)) blueFighter = &b;
+        continue;
+      }
+      ground.push_back(&b);
+      if (b.type == UnitType::HQ) hq = &b;
+    }
+    if (ground.empty() && !blueFighter) return moves;
+    auto cheb = [](const Unit& a, const Unit& b) { return std::max(std::abs(a.x - b.x), std::abs(a.y - b.y)); };
+
+    // Who attacks what.
+    struct Run { const Unit* unit; const Unit* target; int eta; bool dogfight; };
+    std::vector<Run> runs;
+    std::vector<int> load(ground.size(), 0);
+    for (const auto& u : units) {
+      if (!u.alive || u.team != Team::Red || !canAttack(u.type)) continue;
+      const AirProfile& p = profileOf(u.type);
+      const Unit* current = u.targetId.empty() ? nullptr : findUnit(u.targetId);
+      const Unit* tgt = (current && current->alive) ? current : nullptr;
+      bool dogfight = tgt && isAircraft(tgt->type);
+      if (!tgt) {
+        const bool heavy = u.type == UnitType::Missile || u.type == UnitType::Bomber;
+        if (u.type == UnitType::Stealth && blueFighter) {
+          tgt = blueFighter;
+          dogfight = true;
+        } else if (heavy && hq) {
+          tgt = hq;
+        } else if (!ground.empty()) {
+          // Nearest ground asset, pushed away from ones a wingman already has. Headquarters last.
+          size_t best = 0;
+          double bestCost = 1e9;
+          for (size_t i = 0; i < ground.size(); ++i) {
+            const double cost = cheb(u, *ground[i]) + 4.0 * load[i] + (ground[i] == hq && !heavy ? 6.0 : 0.0);
+            if (cost < bestCost) { bestCost = cost; best = i; }
+          }
+          tgt = ground[best];
+        }
+      }
+      if (!tgt) continue;
+      for (size_t i = 0; i < ground.size(); ++i) if (ground[i] == tgt) ++load[i];
+      const int closeIn = (std::max(0, cheb(u, *tgt) - 1) + p.speed - 1) / p.speed;
+      runs.push_back({&u, tgt, std::max(1, closeIn), dogfight});
+    }
+
+    // The jammer heads for headquarters; the strike waits for it, within reason.
+    int jamEta = 0;
+    for (const auto& u : units) {
+      if (!u.alive || u.team != Team::Red || u.type != UnitType::Jammer) continue;
+      const Unit* anchor = hq ? hq : (ground.empty() ? nullptr : ground[0]);
+      if (!anchor) continue;
+      const double d = dist(anchor->x, anchor->y, u.x, u.y);
+      if (d < u.jamRadius - 0.5) continue;  // already covering it
+      jamEta = std::max(jamEta, static_cast<int>(std::ceil(d - (u.jamRadius - 1))));
+      const int tx = clampi(anchor->x + (u.x > anchor->x ? 1 : u.x < anchor->x ? -1 : 0), 0, width - 1);
+      const int ty = clampi(anchor->y + (u.y > anchor->y ? 1 : u.y < anchor->y ? -1 : 0), 0, height - 1);
+      if (u.order.action == OrderAction::Move && u.order.tx == tx && u.order.ty == ty) continue;
+      OpponentMove m;
+      m.id = u.id;
+      m.action = OrderAction::Move;
+      m.tx = tx;
+      m.ty = ty;
+      m.reason = "move in to jam " + anchor->id + " before the strike arrives";
+      moves.push_back(m);
+    }
+
+    // Time on target: the longest run sets the clock.
+    int clock = std::min(jamEta, 8);
+    for (const auto& r : runs) if (!r.dogfight) clock = std::max(clock, r.eta);
+
+    for (const auto& r : runs) {
+      const Unit& u = *r.unit;
+      const bool attacking = !u.targetId.empty() && u.targetId == r.target->id;
+      if (attacking) continue;  // already on its run
+      OpponentMove m;
+      m.id = u.id;
+      if (r.dogfight || r.eta >= clock) {
+        m.action = OrderAction::Launch;
+        m.targetId = r.target->id;
+        m.reason = r.dogfight ? "take blue's fighter out of the fight"
+                              : "start the run on " + r.target->id + " now to arrive with the others in " + std::to_string(clock) + " ticks";
+        moves.push_back(m);
+        continue;
+      }
+      if (u.type == UnitType::Missile) continue;  // a missile simply waits to be fired
+      // Hold until the clock catches up; fighters and drones wait low.
+      const bool low = u.type != UnitType::Bomber;
+      const int level = low ? std::min(1, profileOf(u.type).ceiling) : u.z;
+      if (u.order.action == OrderAction::Orbit && (!low || u.order.tz == level)) continue;
+      m.action = OrderAction::Orbit;
+      m.tz = low ? level : -1;
+      m.reason = "hold " + std::to_string(clock - r.eta) + " ticks so the strike arrives together" + (low ? ", and get down to level 1" : "");
       moves.push_back(m);
     }
     return moves;
