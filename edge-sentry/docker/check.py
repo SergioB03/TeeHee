@@ -160,6 +160,8 @@ def stack():
         by_kernel = status is None or (status["uid"] != 0 and status["caps"] == 0 and status["nnp"] == "1")
         seen[name] = {"config": by_config, "kernel": status}
         confined = confined and by_config and by_kernel
+    visible = sum(1 for v in seen.values() if v["kernel"] is not None)
+    print(f"      the kernel's own report (uid, capabilities, no-new-privileges) was read for {visible} of {len(seen)} containers")
     check("each container runs as a non-root user with no capabilities, on a read-only filesystem", confined, seen)
     cid = container("console")
     refused, _ = sh("docker", "exec", cid, "node", "-e", "require('fs').writeFileSync('/app/probe', '1')")
@@ -211,7 +213,7 @@ def ros2():
                    "ros2", "launch", "edge_sentry_bridge", "demo.launch.py", "ticks:=8", "period:=0.3", timeout=240)
     print(f"      the demo launch exited with status {code}")
     check("the ROS 2 demo plays its ticks over the topics and then stops by itself",
-          code != 124 and "finished 8 ticks" in out, out)
+          code == 0 and "finished 8 ticks" in out, out)
     check("the demo prints each order with its behavior and reason", "DEFEND: cover" in out, out)
     code, out = sh("docker", "run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", image,
                    "python3", "ros2/check_bridge.py", "--sim", "/usr/local/bin/edge-sim", "--node", "/usr/local/bin/edge-node", timeout=300)
