@@ -678,6 +678,103 @@
     ]
   },
   {
+    "id": "WEB-04",
+    "area": "Web console",
+    "text": "The console opens in a Basic view for a first-time visitor: units are named in words, a battle can be watched or played in one or two taps, and none of the technical console shows. An Advanced view holds the full console on the same battle. The visitor's choice is remembered, and a link can ask for either with ?level=.",
+    "tests": [
+      [
+        "web/test_basic.mjs",
+        "browser: a first visit on a phone opens in Basic, with three ways in and none of the console"
+      ],
+      [
+        "web/test_basic.mjs",
+        "browser: Watch a battle hands both sides to the computer and shows the scoreboard"
+      ],
+      [
+        "web/test_basic.mjs",
+        "browser: Send fighter reaches the simulator as an order, and is confirmed in a sentence"
+      ],
+      [
+        "web/test_basic.mjs",
+        "browser: Advanced shows the whole console on the same battle and hides Basic"
+      ],
+      [
+        "web/test_basic.mjs",
+        "browser: the level is remembered across a reload"
+      ],
+      [
+        "web/test_basic.mjs",
+        "a first visit gets Basic"
+      ],
+      [
+        "web/test_basic.mjs",
+        "a link can ask for either level, and wins over the saved choice"
+      ]
+    ]
+  },
+  {
+    "id": "WEB-05",
+    "area": "Web console",
+    "text": "Basic tells a battle in plain words. Every hit, block and failed lock the simulator reports gets one sentence and one flag on the map, a round where nothing lands still says what each side is doing, and no unit id or simulator term appears anywhere in it.",
+    "tests": [
+      [
+        "web/test_basic.mjs",
+        "in a real battle the computer plays, every hit, block and failed lock the simulator reports gets a sentence"
+      ],
+      [
+        "web/test_basic.mjs",
+        "the same holds when a visitor attacks as red and when one leaves blue undefended"
+      ],
+      [
+        "web/test_basic.mjs",
+        "no round in any of them left the visitor with nothing to read"
+      ],
+      [
+        "web/test_basic.mjs",
+        "no sentence the Basic view said in any of this contains a unit id or a simulator term"
+      ],
+      [
+        "web/test_basic.mjs",
+        "browser: a round where something landed is told in as many sentences, flagged in as many places, in plain words"
+      ],
+      [
+        "web/test_basic.mjs",
+        "browser: the map names every unit in a word, and nothing on the page is a unit id or a simulator term"
+      ]
+    ]
+  },
+  {
+    "id": "WEB-06",
+    "area": "Web console",
+    "text": "What Basic says is true of the simulator. Every unit type has a name, each aircraft's description matches its numbers in the C++ tables, an attack the simulator would refuse is not offered, the strength shown is the sum the server scores a game with, and a visitor is only told they beat the computer when they did.",
+    "tests": [
+      [
+        "web/test_basic.mjs",
+        "every unit type the simulator has gets a plain name and a description"
+      ],
+      [
+        "web/test_basic.mjs",
+        "what Basic says about each aircraft is true of the simulator's numbers"
+      ],
+      [
+        "web/test_basic.mjs",
+        "which aircraft may attack aircraft is the simulator's own table"
+      ],
+      [
+        "web/test_basic.mjs",
+        "a bomber or a drone cannot be sent at an aircraft, and anything can be sent at the ground"
+      ],
+      [
+        "web/test_basic.mjs",
+        "blue's strength, averaged over a real battle, is the score the server reports"
+      ],
+      [
+        "web/test_basic.mjs",
+        "a watched battle's score is offered as the one to beat, and beating it is only claimed when it happened"
+      ]
+    ]
+  },
+  {
     "id": "CON-01",
     "area": "Containers",
     "text": "One Dockerfile builds the console, the planner and the test tools. The planner image holds a single statically linked file and nothing else.",

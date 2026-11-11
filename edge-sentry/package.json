@@ -10,7 +10,7 @@
     "sim": "native/build/edge-sim",
     "web": "bash web/run.sh",
     "test": "python3 native/tests/test_cli.py && python3 native/tests/test_planner.py",
-    "test:web": "python3 web/test_sessions.py",
+    "test:web": "python3 web/test_sessions.py && node web/test_basic.mjs",
     "eval:model": "python3 ml/evaluate.py --check",
     "eval:outcome": "python3 ml/outcome.py --rollouts 40 --check --no-write",
     "eval:autonomy": "python3 ml/autonomy_eval.py --rollouts 30 --check --no-write",

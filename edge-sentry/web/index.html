@@ -7,6 +7,17 @@
 <meta name="theme-color" content="#121A1C" media="(prefers-color-scheme: dark)">
 <title>edge-sentry console</title>
 <link rel="icon" href="data:,">
+<script>
+// Basic or Advanced, decided before anything is drawn so the page never flashes the wrong one.
+// A ?level= in the address wins, then the visitor's last choice, then Basic.
+(function () {
+  var asked = null, kept = null;
+  try { asked = new URLSearchParams(location.search).get("level"); } catch (e) { /* no address to read */ }
+  try { kept = localStorage.getItem("edge-sentry-level"); } catch (e) { /* storage blocked */ }
+  var level = asked === "advanced" || asked === "basic" ? asked : kept === "advanced" ? "advanced" : "basic";
+  document.documentElement.setAttribute("data-level", level);
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600&display=swap" rel="stylesheet">
@@ -52,13 +63,25 @@ body {
 }
 .shell { max-width: 520px; margin: 0 auto; padding: 0 14px; }
 
+/* Basic shows the battle in plain words; Advanced is the full console. Each hides the other's blocks. */
+[hidden] { display: none !important; }
+html[data-level="basic"] .only-advanced { display: none !important; }
+html[data-level="advanced"] .only-basic { display: none !important; }
+
+/* Phones: the title and the Basic / Advanced switch share the first row, and Advanced's clock and reset
+   take a second one. Wide screens put all four on one line (see the media query at the end). */
 .topbar {
-  display: flex; align-items: baseline; gap: 12px;
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 8px 12px;
   padding: calc(12px + env(safe-area-inset-top)) 0 10px;
 }
-.topbar h1 { font: 600 22px/1 var(--label); margin: 0; letter-spacing: 0.01em; }
-.topbar .tick { font: 500 16px/1 var(--label); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
-.topbar .spacer { flex: 1; }
+.topbar h1 { grid-area: 1 / 1; font: 600 clamp(19px, 6vw, 22px)/1 var(--label); margin: 0; letter-spacing: 0.01em; white-space: nowrap; }
+.topbar .level { grid-area: 1 / 2; display: flex; }
+.topbar .tick { grid-area: 2 / 1; font: 500 16px/1 var(--label); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.topbar #reset { grid-area: 2 / 2; }
+.level button { border-radius: 0; margin-left: -1px; padding: 0 clamp(8px, 2.8vw, 12px); }
+.level button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.level button:last-child { border-radius: 0 6px 6px 0; }
+.level button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
 button, select {
   font: 500 15px/1 var(--label);
@@ -213,7 +236,8 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
   padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
 }
 .clock div { max-width: 520px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
-.clock button { min-height: 50px; font-size: 16px; }
+html[data-level="basic"] .clock div { grid-template-columns: 3fr 2fr; }
+.clock button { min-height: 50px; padding: 0 8px; font-size: 16px; }
 
 /* 3D aircraft figures */
 .craft { cursor: pointer; }
@@ -265,6 +289,85 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 .unit.untracked, .craft.untracked, .gunit.untracked { opacity: 0.38; }
 #sensors { margin-top: 18px; }
 
+/* ---- Basic view --------------------------------------------------------------
+   The same battle and the same map, told in plain words: what each thing is, what just happened,
+   and one or two things to tap. Nothing here appears in Advanced. */
+.b-title { font: 600 27px/1.1 var(--label); margin: 2px 0 8px; text-wrap: balance; }
+.b-lede { margin: 0 0 14px; font-size: 16px; max-width: 36em; }
+.b-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.b-choices button { min-height: 50px; padding: 0 8px; font-size: clamp(14px, 4.3vw, 16px); }
+.b-choices .go { grid-column: 1 / -1; min-height: 56px; font-size: 19px; font-weight: 600; }
+.b-more { margin: 0 0 12px; font-size: 15px; color: var(--ink-soft); }
+.b-more button { margin-top: 8px; width: 100%; }
+
+/* Scoreboard: how far through the battle, and how much of blue is still working. */
+.b-score { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; margin-bottom: 12px; }
+.b-score .lab { font: 600 clamp(14px, 4.2vw, 16px)/1.2 var(--label); white-space: nowrap; }
+.b-pips { display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; height: 10px; margin-top: 7px; }
+.b-pips i { background: var(--line); }
+.b-pips i.done { background: var(--ink); }
+.b-gauge { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; margin-top: 3px; }
+.b-gauge b { font: 600 16px/18px var(--label); font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
+.b-bar { position: relative; height: 10px; background: var(--line); }
+.b-bar i { position: absolute; inset: 0 auto 0 0; background: var(--blue); transition: width 420ms cubic-bezier(.3,.7,.2,1); }
+
+.b-result { margin: 0 0 12px; padding: 12px 14px; border-left: 4px solid var(--ink); background: var(--paper-raised); }
+.b-result h2 { font: 600 24px/1.12 var(--label); margin: 0 0 6px; text-wrap: balance; }
+.b-result p { margin: 0 0 6px; font-size: 16px; }
+.b-result p:last-child { margin-bottom: 0; }
+.b-result .aside { color: var(--ink-soft); font-size: 15px; }
+
+/* The play-by-play under the map. The dot is the colour of the side that did it. */
+.b-caption { list-style: none; margin: 12px 0 0; padding: 0; min-height: 4.2em; font: 500 17px/1.36 var(--body); }
+.b-caption li { position: relative; padding-left: 18px; margin-bottom: 4px; }
+.b-caption li::before { content: ""; position: absolute; left: 1px; top: 0.46em; width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.b-caption li.blue::before { background: var(--blue); }
+.b-caption li.red::before { background: var(--red); }
+.b-caption li.plain { font-weight: 400; color: var(--ink-soft); }
+
+/* What the tapped thing is, and what can be done about it. */
+.b-card { margin: 12px 0 0; padding: 10px 14px 14px; border-left: 4px solid var(--ink); background: var(--paper-raised); }
+.b-card.blue { border-left-color: var(--blue); }
+.b-card.red { border-left-color: var(--red); }
+.b-card .head { display: flex; align-items: center; gap: 10px; }
+.b-card h2 { flex: 1; font: 600 21px/1.15 var(--label); margin: 0; }
+.b-card p { margin: 6px 0 0; font-size: 15px; }
+.b-card .do { font: 500 17px/1.35 var(--body); }
+.b-card .state { color: var(--ink-soft); }
+.b-card .health { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 10px; font: 600 15px/1 var(--label); }
+.b-card .health b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.b-card .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.b-card .acts:empty { display: none; }
+.b-card .acts button { flex: 1 1 140px; min-height: 48px; font-size: 16px; }
+
+.b-controls { display: grid; grid-template-columns: 3fr 2fr; gap: 8px; margin-top: 14px; }
+.b-controls #bPilot[hidden] + #bLeave { grid-column: 1 / -1; }
+
+.b-legend { margin-top: 18px; }
+.b-legend h3 { font: 600 16px/1.2 var(--label); margin: 4px 0 2px; }
+.b-legend h3.blue { color: var(--blue); }
+.b-legend h3.red { color: var(--red); }
+.b-legend ul { list-style: none; margin: 0 0 14px; padding: 0; }
+.b-legend li { display: grid; grid-template-columns: 34px 1fr; gap: 0 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.4; }
+.b-legend li.wide { display: block; }
+.b-legend li svg { width: 32px; height: 32px; }
+.b-legend li b { display: block; font: 600 16px/1.3 var(--label); }
+.b-legend .blue svg { fill: var(--blue); stroke: var(--blue); }
+.b-legend .red svg { fill: var(--red); stroke: var(--red); }
+.b-legend .notes svg { fill: none; stroke: var(--ink-soft); }
+.b-legend .wash { fill-opacity: 0.16; }
+
+/* A small flag on the map where this round's hits, blocks and losses happened. */
+.callout { pointer-events: none; }
+.callout path { stroke: var(--paper-raised); stroke-width: 1; stroke-linejoin: round; fill: var(--ink-soft); }
+.callout.blue path { fill: var(--blue); }
+.callout.red path { fill: var(--red); }
+.callout text { font-family: var(--label); font-size: 9.5px; font-weight: 600; fill: var(--paper-raised); text-anchor: middle; dominant-baseline: central; }
+.callout.pop { animation: callout-pop 280ms cubic-bezier(.3,1.5,.5,1) both; }
+@keyframes callout-pop { from { transform: scale(0.3); opacity: 0; } }
+/* Basic names every unit in words, a little larger than Advanced's ids. */
+html[data-level="basic"] .labels text { font-size: 9.5px; }
+
 /* Wide screens: big map on the left that stays in view, everything else in a panel on the right */
 @media (min-width: 1000px) {
   body { padding-bottom: 0; }
@@ -273,7 +376,8 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.6fr);
     grid-template-rows: auto auto 1fr; column-gap: 36px;
   }
-  .topbar { grid-column: 1 / -1; }
+  .topbar { grid-column: 1 / -1; display: flex; }
+  .topbar .level { margin-left: auto; }
   .stage { grid-column: 1; grid-row: 2 / 4; position: sticky; top: 0; align-self: start; padding-top: 4px; }
   #mode { grid-column: 2; grid-row: 2; }
   .side { grid-column: 2; grid-row: 3; }
@@ -285,20 +389,57 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
   .selected { margin-top: 0; }
 }
 
-@media (prefers-reduced-motion: reduce) { .unit { transition: none; } button:active { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .unit { transition: none; } button:active { transform: none; }
+  .callout.pop { animation: none; } .b-bar i { transition: none; }
+}
 </style>
 </head>
 <body>
 <div class="shell">
   <header class="topbar">
     <h1>edge-sentry</h1>
-    <span class="tick" id="tick">Tick 0</span>
-    <span class="spacer"></span>
-    <button class="quiet" id="reset" type="button">Reset scenario</button>
+    <span class="tick only-advanced" id="tick">Tick 0</span>
+    <div class="level" role="group" aria-label="How much detail to show">
+      <button id="levelBasic" type="button" aria-pressed="true">Basic</button>
+      <button id="levelAdvanced" type="button" aria-pressed="false">Advanced</button>
+    </div>
+    <button class="quiet only-advanced" id="reset" type="button">Reset scenario</button>
   </header>
 
   <section class="mode" id="mode" aria-label="Play mode">
-    <div id="modeIdle">
+    <!-- Basic: what this is and three ways in, then a scoreboard once a battle is on. -->
+    <div class="only-basic" id="bIdle">
+      <h2 class="b-title">Red is coming for blue's base.</h2>
+      <p class="b-lede">Blue has 20 rounds to keep it standing. Watch the computer play both sides, or take one yourself.</p>
+    </div>
+    <div class="only-basic" id="bGame" hidden>
+      <div class="b-score">
+        <div>
+          <div class="lab" id="bRound">Before round 1</div>
+          <div class="b-pips" id="bPips" aria-hidden="true"></div>
+        </div>
+        <div>
+          <div class="lab" id="bStrengthLabel">Blue's strength</div>
+          <div class="b-gauge"><div class="b-bar" aria-hidden="true"><i id="bStrengthBar"></i></div><b id="bStrength">100%</b></div>
+        </div>
+      </div>
+      <div class="b-result" id="bResult" aria-live="polite" hidden>
+        <h2 id="bVerdict"></h2>
+        <p id="bScoreLine"></p>
+        <p id="bStats"></p>
+        <p class="aside" id="bPar"></p>
+      </div>
+    </div>
+    <div class="b-choices only-basic" id="bChoices">
+      <button class="go" id="bWatch" type="button">Watch a battle</button>
+      <button class="blue" id="bDefend" type="button">Defend as blue</button>
+      <button class="red" id="bAttack" type="button">Attack as red</button>
+    </div>
+    <p class="b-more only-basic" id="bMore" hidden>Want to know why the computer did what it did? Advanced shows every order with its reason, the threat scores and the logs.
+      <button id="bOpenAdvanced" type="button">Open Advanced</button></p>
+
+    <div class="only-advanced" id="modeIdle">
       <p>Pick a side and play 20 ticks against the computer, or explore freely with the map below.</p>
       <div class="sides">
         <button class="blue" id="playBlue" type="button">Play as blue</button>
@@ -311,7 +452,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
       </div>
       <p class="enemy orders-said" id="sandboxMoves" aria-live="polite" role="button" tabindex="0" aria-expanded="false" title="Show all of it" hidden></p>
     </div>
-    <div id="modeGame" hidden>
+    <div class="only-advanced" id="modeGame" hidden>
       <p class="status" id="gameStatus"></p>
       <!-- The buttons sit straight under the status line so they stay put however long the order text below gets. -->
       <div class="sides three">
@@ -328,7 +469,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
   </section>
 
   <div class="stage">
-  <div class="viewbar">
+  <div class="viewbar only-advanced">
     <div class="seg" role="group" aria-label="Map view">
       <button id="view2d" type="button" aria-pressed="true">Flat map</button>
       <button id="view3d" type="button" aria-pressed="false">3D view</button>
@@ -348,45 +489,68 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </svg>
   </div>
 
-  <p class="hint" id="hint"><span id="hintText" aria-live="polite">Loading the sandbox.</span><button class="quiet" id="cancel" type="button" hidden>Cancel</button></p>
+  <p class="hint only-advanced" id="hint"><span id="hintText" aria-live="polite">Loading the sandbox.</span><button class="quiet" id="cancel" type="button" hidden>Cancel</button></p>
   <p class="error" id="error" role="alert" hidden></p>
-  <div class="clock"><div>
-    <button class="go" id="tick1" type="button">Advance 1 tick</button>
-    <button id="tick5" type="button">Advance 5</button>
+  <!-- Basic: what just happened, in sentences. Tapping a unit swaps this for a card about that unit. -->
+  <ul class="b-caption only-basic" id="bCaption" aria-live="polite"></ul>
+  <section class="b-card only-basic" id="bCard" aria-live="polite" hidden></section>
+  <div class="clock" id="clock"><div>
+    <button class="go only-advanced" id="tick1" type="button">Advance 1 tick</button>
+    <button class="only-advanced" id="tick5" type="button">Advance 5</button>
+    <button class="go only-basic" id="bNext" type="button">Next round</button>
+    <button class="only-basic" id="bPlay" type="button" aria-pressed="false">Auto-play</button>
   </div></div>
-  <p class="keys">Keyboard: Space advances a tick, the left and right arrows turn the 3D view.</p>
+  <p class="keys only-advanced">Keyboard: Space advances a tick, the left and right arrows turn the 3D view.</p>
+  <p class="keys only-basic">Keyboard: Space plays the next round, the left and right arrows turn the map.</p>
   </div>
 
   <div class="side">
 
-  <section class="selected" id="selected" hidden>
+  <div class="b-controls only-basic" id="bControls" hidden>
+    <button id="bPilot" type="button">Take the controls</button>
+    <button class="quiet" id="bLeave" type="button">Back to start</button>
+  </div>
+
+  <details class="b-legend only-basic" id="bLegend" open>
+    <summary>What you're looking at</summary>
+    <h3 class="blue">Blue defends</h3>
+    <ul class="blue" id="bLegendBlue"></ul>
+    <h3 class="red">Red attacks</h3>
+    <ul class="red" id="bLegendRed"></ul>
+    <h3>Reading the map</h3>
+    <ul class="notes" id="bLegendMap"></ul>
+    <h3>How a battle works</h3>
+    <ul class="notes" id="bLegendScore"></ul>
+  </details>
+
+  <section class="selected only-advanced" id="selected" hidden>
     <h2 id="selName"></h2>
     <p class="facts" id="selFacts"></p>
     <input class="why" id="why" type="text" maxlength="300" placeholder="Reason for the log (optional)" aria-label="Reason for this order">
     <div class="orders" id="orders"></div>
   </section>
 
-  <section class="block">
+  <section class="block only-advanced">
     <h2>Red contacts</h2>
     <ul class="rows" id="contacts"></ul>
   </section>
 
-  <section class="block">
+  <section class="block only-advanced">
     <h2>Blue force</h2>
     <ul class="rows" id="blue"></ul>
   </section>
 
-  <section class="block">
+  <section class="block only-advanced">
     <h2>Event log</h2>
     <ol class="rows log" id="log"></ol>
   </section>
 
-  <section class="block">
+  <section class="block only-advanced">
     <h2>Decision log</h2>
     <ol class="rows decisions" id="decisions"></ol>
   </section>
 
-  <details id="sensors">
+  <details class="only-advanced" id="sensors">
     <summary>Sensors</summary>
     <div class="spawn">
       <select id="noise" aria-label="Sensor noise">
@@ -403,7 +567,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     <p class="key">With noise on, blue's sensors miss contacts some of the time and report positions that are a little off. A dashed blue circle shows where blue thinks a contact is and how unsure it is; a faded red unit has no track, so the threat model and the planner cannot see it. The tracker blends every sensor's reports and rides through short gaps.</p>
   </details>
 
-  <details id="addUnit">
+  <details class="only-advanced" id="addUnit">
     <summary>Add a unit</summary>
     <div class="spawn">
       <select id="spawnTeam" aria-label="Team">
@@ -425,7 +589,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </details>
 
-  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows aircraft as figures at their altitude, each with a shadow on the ground below it, nose up or down as it climbs or dives, banked while it orbits, and a missile leaves a bright trail; drag sideways to turn the view. Ground units there are small models: a block with a flag is headquarters, a mast with a dish is a sensor, a lattice tower is a relay, and a block with radio waves is a jammer. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
+  <p class="key only-advanced">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows aircraft as figures at their altitude, each with a shadow on the ground below it, nose up or down as it climbs or dives, banked while it orbits, and a missile leaves a bright trail; drag sideways to turn the view. Ground units there are small models: a block with a flag is headquarters, a mast with a dish is a sensor, a lattice tower is a relay, and a block with radio waves is a jammer. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
   </div>
 </div>
 
@@ -438,6 +602,12 @@ const CELL = 30, LEFT = 20, TOP = 3, BOTTOM = 18;
 const ABBR = { hq: "HQ", sensor: "SN", relay: "RL", jammer: "JM", jet: "JT", missile: "MS", stealth: "SF", bomber: "BM", drone: "DR" };
 const KIND = { hq: "headquarters", sensor: "sensor", relay: "relay", jammer: "jammer", jet: "jet", missile: "missile",
                stealth: "stealth fighter", bomber: "bomber", drone: "drone" };
+// ---- plain words: start ----
+// Everything from here to "plain words: end" is pure: no page, no network, no shared state. It turns
+// what the simulator reports into the sentences the Basic view shows, and web/test_basic.mjs runs this
+// block on its own against real battles to check that every hit, block and loss gets a sentence and
+// that no unit id or simulator term leaks into one.
+
 // Highest altitude level each aircraft type can reach (the simulator enforces it).
 const CEIL = { jet: 5, stealth: 5, bomber: 5, drone: 2, missile: 5 };
 const isAir = (u) => u.type in CEIL;
@@ -452,6 +622,206 @@ const ICON = {
   missile: "M0,-9 L1.5,-6 L1.5,4 L4,8 L1.5,7 L0,9 L-1.5,7 L-4,8 L-1.5,4 L-1.5,-6 Z",
 };
 
+// What a first-time visitor is told a unit is. Basic never shows a unit id.
+const PLAIN = { hq: "base", sensor: "radar", relay: "radio tower", jammer: "jammer",
+                jet: "jet", stealth: "stealth jet", bomber: "bomber", drone: "drone", missile: "missile" };
+// Only these may attack aircraft: the simulator's air-to-air column.
+const HITS_AIR = new Set(["jet", "stealth", "missile"]);
+const canHit = (attacker, target) => !isAir(target) || HITS_AIR.has(attacker.type);
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const count = (n, one, many = one + "s") => `${n === 0 ? "no" : n} ${n === 1 ? one : many}`;
+// A blue jet of either kind is "the fighter": the one thing blue has that shoots red aircraft down.
+const plainKind = (u) => (u.team === "blue" && (u.type === "jet" || u.type === "stealth") ? "fighter" : PLAIN[u.type] ?? "unit");
+const plainTitle = (u) => `${cap(u.team)} ${plainKind(u)}`;
+const shieldOf = (team, me) => (me && team === me ? "Your shield" : `${cap(team)}'s shield`);
+
+// How a sentence refers to a unit: "your fighter", "blue's base", "the red bomber", "a red missile".
+// me is the side the reader commands ("blue" or "red"), or null for someone watching.
+function plainName(u, units, me) {
+  const kind = plainKind(u);
+  const several = units.filter((o) => o.team === u.team && plainKind(o) === kind).length > 1;
+  if (me && u.team === me) return several ? `one of your ${kind}s` : `your ${kind}`;
+  if (u.team === "blue") return several ? `one of blue's ${kind}s` : `blue's ${kind}`;
+  return several ? `a red ${kind}` : `the red ${kind}`;
+}
+
+// One or two sentences on what a kind of unit is for, to sit under its name. Each claim here is a rule
+// of the simulator: who can attack what, how well radar sees it, how hard it hits.
+function aboutKind(team, type) {
+  const foe = team === "blue" ? "red" : "blue";
+  if (plainKind({ team, type }) === "fighter") return `It hunts ${foe} aircraft and shoots them down.`;
+  switch (type) {
+    case "hq": return `${cap(foe)} is trying to wreck it. Its shield blocks every hit from one ${foe} attacker at a time, as long as radar has a clear fix on that attacker.`;
+    case "sensor": return `It is how ${team} sees ${foe} coming. Without a clear radar fix, the shield cannot lock on.`;
+    case "relay": return `It links ${team}'s units and helps the radars keep watch.`;
+    case "jammer": return `Inside its shaded circle, ${foe}'s radars see less and ${foe}'s ground units work worse. ${cap(foe)}'s shield can silence it, but only instead of blocking an attacker.`;
+    case "jet": return `It can attack ${foe}'s ground units and ${foe}'s aircraft.`;
+    case "stealth": return "Fast, and hard for radar to see, so the shield often cannot lock onto it.";
+    case "bomber": return "Easy for radar to spot, but it hits hard and can strike from high up. It can only attack things on the ground.";
+    case "drone": return "It flies low and is hard for radar to see. Its hits are light, and it can only attack things on the ground.";
+    case "missile": return "It flies in, hits once and is gone. Nothing hits harder.";
+    default: return "";
+  }
+}
+
+// How much of blue's force is still working, 0 to 1: the same sum the server scores a game with.
+function strengthNow(world) {
+  const blue = world.units.filter((u) => u.team === "blue");
+  if (!blue.length) return 0;
+  return blue.reduce((sum, u) => sum + (u.alive ? (u.hp / 100) * (u.integrity ?? 1) : 0), 0) / blue.length;
+}
+
+// What happened in the round just played, one sentence each. A line carries the side that did it
+// (team), what it was (hit, lost, blocked or nolock), the unit it happened to (on) and whether that
+// unit flies (air), so the map can flag the same things in the same colours.
+function roundStory(world, me, limit = 5) {
+  const by = new Map(world.units.map((u) => [u.id, u]));
+  const name = (u) => plainName(u, world.units, me);
+  const acts = [];
+  for (const e of world.events) {
+    if (e.tick !== world.tick) continue;
+    if (e.kind === "engage" || e.kind === "blocked" || e.kind === "nolock") {
+      const sep = e.kind === "engage" ? " hit " : e.kind === "blocked" ? " blocked by " : " had no firing solution on ";
+      const [first, second] = e.detail.split(sep).map((id) => by.get(id));
+      if (!first || !second) continue;
+      // The simulator names the attacker first for a hit or a block, and the base first for a failed lock.
+      if (e.kind === "nolock") acts.push({ what: "nolock", a: second, b: first });
+      else acts.push({ what: e.kind === "engage" ? "hit" : "blocked", a: first, b: second });
+    } else if (e.kind === "destroyed") {
+      // The blow that finished a unit is the hit reported just before it.
+      const blow = [...acts].reverse().find((x) => x.what === "hit" && x.b.id === e.detail);
+      if (blow) blow.what = "lost";
+    }
+  }
+  const lines = acts.map(({ what, a, b }) => {
+    if (what === "hit") return { team: a.team, what, on: b.id, air: isAir(b), text: cap(`${name(a)} hit ${name(b)}.`) };
+    if (what === "lost") return { team: a.team, what, on: b.id, air: isAir(b), text: cap(`${name(a)} ${isAir(b) ? "shot down" : "destroyed"} ${name(b)}.`) };
+    if (what === "blocked") {
+      const how = a.type === "missile" ? `stopped ${name(a)}` : `blocked a hit from ${name(a)}`;
+      return { team: b.team, what, on: b.id, air: false, text: `${shieldOf(b.team, me)} ${how}.` };
+    }
+    return { team: null, what, on: b.id, air: false, text: `${shieldOf(b.team, me)} could not lock onto ${name(a)}.` };
+  });
+  if (lines.length > limit) {
+    const extra = lines.length - (limit - 1);
+    lines.splice(limit - 1, lines.length, { team: null, what: "more", on: null, air: false, text: `And ${extra} more.` });
+  }
+  return lines;
+}
+
+// A round where nothing landed still gets a line or two: who blue is after, and how close red is.
+function quietStory(world, me) {
+  const by = new Map(world.units.map((u) => [u.id, u]));
+  const name = (u) => plainName(u, world.units, me);
+  const alive = world.units.filter((u) => u.alive);
+  const lines = [];
+  // Blue's answer first: the fighter, which moves, and then the shield, which does not.
+  for (const u of alive) {
+    const tgt = by.get(u.targetId);
+    if (u.team === "blue" && isAir(u) && tgt?.alive) lines.push({ team: "blue", text: cap(`${name(u)} is ${isAir(tgt) ? "chasing" : "heading for"} ${name(tgt)}.`) });
+  }
+  for (const u of alive) {
+    const covered = u.team === "blue" && u.order?.action === "defend" ? by.get(u.order.targetId) : null;
+    if (covered?.alive) lines.push({ team: "blue", text: `${shieldOf("blue", me)} is aimed at ${name(covered)}.` });
+  }
+  let near = null;
+  for (const u of alive) {
+    const tgt = by.get(u.targetId);
+    if (u.team !== "red" || !isAir(u) || !tgt?.alive) continue;
+    const far = Math.hypot(u.x - tgt.x, u.y - tgt.y);
+    if (!near || far < near.far) near = { u, tgt, far };
+  }
+  if (near) {
+    const squares = Math.round(near.far);
+    lines.push({ team: "red", text: cap(squares <= 1 ? `${name(near.u)} is right on top of ${name(near.tgt)}.`
+                                                      : `${name(near.u)} is ${squares} squares from ${name(near.tgt)}.`) });
+  }
+  const jammed = alive.filter((u) => u.team === "blue" && !isAir(u) && (u.integrity ?? 1) < 0.99).length;
+  const jammer = alive.find((u) => u.team === "red" && u.type === "jammer");
+  if (jammed && jammer) lines.push({ team: "red", text: cap(`${name(jammer)} is weakening ${jammed} of ${me === "blue" ? "your" : "blue's"} units.`) });
+  if (me === "red" && !near) lines.push({ team: null, text: "Your aircraft are waiting for orders. Tap one, then tap the blue unit it should attack." });
+  if (me === "blue" && !lines.some((l) => l.team === "blue")) lines.push({ team: null, text: "Your fighter and your shield have no orders. Tap a red unit to give them one." });
+  if (!lines.length) lines.push({ team: null, text: "Nobody has orders, so nothing is moving." });
+  return lines.slice(0, 4);
+}
+
+// Before the first round: who is playing, and what to tap.
+function openingStory(side, watching) {
+  if (watching) return [{ team: null, text: "The computer is playing both sides. Pause whenever you like, or tap anything on the map to see what it is." }];
+  if (side === "blue") return [{ team: null, text: "You are defending. Tap a red unit, then send your fighter after it or aim your shield at it." },
+                               { team: null, text: "Press Next round when you are ready." }];
+  return [{ team: null, text: "You are attacking. Tap one of your aircraft, then tap the blue unit it should hit." },
+          { team: null, text: "Press Next round when you are ready." }];
+}
+
+// The end of a battle in words. The score is blue's average strength, so a defender wants it high and
+// an attacker wants it low. par is the score of a battle the computer played on its own, if one was watched.
+function resultStory(game, watching, par) {
+  const v = game.missionValue, score = Math.round(v * 100);
+  const you = watching ? null : game.side;
+  const who = you === "blue" ? "You" : "Blue";
+  const title = you === "red"
+    ? (v < 0.6 ? "You broke through." : v < 0.75 ? "You hurt blue badly." : v < 0.85 ? "Blue held you off." : "Blue barely felt it.")
+    : (v >= 0.85 ? `${who} held firm.` : v >= 0.75 ? `${who} held.` : v >= 0.6 ? `${who} took a beating.` : `${who} ${you ? "were" : "was"} overrun.`);
+  const over = `averaged over the ${game.limit} rounds`;
+  const scoreLine = you === "blue" ? `You kept ${score}% of your strength, ${over}.`
+    : you === "red" ? `You left blue with ${score}% of its strength, ${over}.`
+    : `Blue kept ${score}% of its strength, ${over}.`;
+  const stats = you === "blue"
+    ? `Red landed ${count(game.hits, "hit")}. Your shield stopped ${count(game.blocked, "attack")}, you destroyed ${count(game.shotDown, "red unit")}, and you lost ${count(game.lost, "unit")}.`
+    : you === "red"
+    ? `You landed ${count(game.hits, "hit")}. Blue's shield stopped ${count(game.blocked, "attack")}, blue destroyed ${count(game.shotDown, "unit")} of yours, and blue lost ${count(game.lost, "unit")}.`
+    : `Red landed ${count(game.hits, "hit")}. Blue's shield stopped ${count(game.blocked, "attack")}, blue destroyed ${count(game.shotDown, "red unit")}, and blue lost ${count(game.lost, "unit")}.`;
+  let aside;
+  if (!you) aside = `That is the computer's score. Defend and try to keep more than ${score}%, or attack and try to leave blue less.`;
+  else if (typeof par !== "number") aside = "Watch a battle to see what the computer scores on its own.";
+  else {
+    const parScore = Math.round(par * 100);
+    const beat = you === "blue" ? score > parScore : score < parScore;
+    aside = (you === "blue" ? `When you watched the computer defend, it kept ${parScore}%.` : `When you watched the computer attack, blue kept ${parScore}%.`)
+      + (beat ? " You beat it." : score === parScore ? " You matched it." : "");
+  }
+  return { title, scoreLine, stats, aside };
+}
+
+// The card shown when a unit is tapped: what it is, and what it is doing right now.
+function aboutUnit(u, world, me) {
+  const by = new Map(world.units.map((o) => [o.id, o]));
+  const name = (o) => plainName(o, world.units, me);
+  const state = [];
+  if (!u.alive) state.push(u.type === "missile" ? "It is gone." : isAir(u) ? "It has been shot down." : "It has been destroyed.");
+  else {
+    const tgt = by.get(u.targetId);
+    if (isAir(u)) state.push(tgt?.alive ? `Right now it is going after ${name(tgt)}.` : u.order?.action === "orbit" ? "Right now it is circling." : "Right now it has no orders.");
+    if (u.type === "hq") {
+      const covered = u.order?.action === "defend" ? by.get(u.order.targetId) : null;
+      state.push(covered?.alive ? `Its shield is aimed at ${name(covered)}.` : "Its shield is not aimed at anything.");
+    }
+    if (u.team === "blue" && !isAir(u) && (u.integrity ?? 1) < 0.99) state.push(`It is being jammed and is working at ${Math.round(u.integrity * 100)}%.`);
+  }
+  return { title: plainTitle(u), team: u.team, about: aboutKind(u.team, u.type), state,
+           health: u.alive ? Math.max(0, Math.min(100, Math.round(u.hp))) : 0 };
+}
+
+// The Basic legend: every kind of unit a battle has, then how to read the map and the score.
+const LEGEND = { blue: ["hq", "sensor", "relay", "stealth"], red: ["missile", "bomber", "jet", "stealth", "drone", "jammer"] };
+const MAP_NOTES = [
+  ["height", "Height is altitude. The thin line under an aircraft drops straight down to its shadow on the ground."],
+  ["health", "The small bar under each name is its health."],
+  ["aim", "A red line runs from an attacker to its target."],
+  ["shield", "A dashed blue line shows where the shield is aimed."],
+  ["jam", "The shaded circle is how far the jammer reaches."],
+  ["hill", "Raised squares are hills. Aircraft flying low can hide behind them."],
+  ["turn", "Drag sideways to turn the map."],
+];
+const SCORE_NOTES = [
+  "A battle is 20 rounds. In each one, every unit moves once.",
+  "Blue's strength is how much of blue's force is still working. Hits and jamming bring it down.",
+  "The score is blue's average strength over the battle. Blue wants it high and red wants it low.",
+  "When the computer plays blue, this project's autonomy planner chooses every move. Advanced shows its reason for each one.",
+];
+// ---- plain words: end ----
+
 let world = null;
 let selectedId = null;
 let mode = null; // null | "move" | "launch" | "defend" | "spawn"
@@ -465,6 +835,31 @@ let yaw = -0.55;          // 3D view rotation about the vertical axis, radians
 try {
   view = localStorage.getItem("edge-sentry-view") === "2d" ? "2d" : "3d";
 } catch { /* storage can be unavailable; the default view is fine */ }
+
+// Basic or Advanced: set on <html> by the script in the head before the page was drawn.
+let level = document.documentElement.getAttribute("data-level") === "advanced" ? "advanced" : "basic";
+const basic = () => level === "basic";
+// Basic always shows the 3D battlefield; Advanced shows whichever view the visitor last chose.
+const shownView = () => (basic() ? "3d" : view);
+let busy = false;         // a request is in flight
+let playing = false;      // Basic: rounds are advancing on their own
+let playTimer = 0;
+let note = null;          // Basic: { tick, team, text } confirming the order just given
+let watchStart = false;   // Basic: between pressing "Watch a battle" and the computer taking blue
+let unaided = false;      // Basic: the computer has played this whole battle, so its score is the one to beat
+let par = null;           // Basic: that score, once a battle has been watched to the end
+try {
+  const kept = Number(localStorage.getItem("edge-sentry-par"));
+  if (kept > 0 && kept <= 1) par = kept;
+} catch { /* no saved score; the result just says so */ }
+let seenTick = null;      // the last tick drawn, to tell a one-round step from any other redraw
+let glideT = 1;           // Basic: 0 to 1 while units slide from last round's place to this round's
+let glideFrame = 0;
+let poppedTick = null;    // the tick whose map flags have already made their entrance
+const calm = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+// The plain-words block always says "tap". With a mouse and no touch screen, the page says "click".
+const mouse = Boolean(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
+const say = (text) => (mouse ? text.replace(/\bTap\b/g, "Click").replace(/\btap\b/g, "click") : text);
 
 // Each visitor gets their own sandbox: a random id kept in this browser.
 function sessionId() {
@@ -501,6 +896,7 @@ const unitById = (id) => world?.units.find((u) => u.id === id);
 const pct = (v) => Math.max(0, Math.min(1, v)) * 100 + "%";
 
 function setBusy(on) {
+  busy = on;
   for (const b of document.querySelectorAll("button")) b.disabled = on;
 }
 function showError(msg) { $("error").textContent = msg; $("error").hidden = false; }
@@ -662,15 +1058,18 @@ const pts = (list) => list.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).j
 function drawCraft(root, u, x, y, gx, gy, labels) {
   const g = svg("g", { class: `craft ${u.team}${u.id === selectedId ? " selected" : ""}${untracked(u) ? " untracked" : ""}`, role: "button", tabindex: 0 }, root);
   g.dataset.id = u.id;
-  g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type]} at ${u.x}, ${u.y}, level ${u.z}`);
-  const [hx, hy] = headingOf(u);
+  // While Basic slides a unit between rounds, u is a copy part-way along and u.src is the unit itself.
+  const o = u.src ?? u;
+  g.setAttribute("aria-label", basic() ? `${plainTitle(o)}, health ${Math.round(o.hp)}%`
+                                       : `${o.id}, ${o.team} ${KIND[o.type]} at ${o.x}, ${o.y}, level ${o.z}`);
+  const [hx, hy] = headingOf(o);
   const len = Math.hypot(hx, hy) || 1;
   const fx = hx / len, fy = hy / len, rx = -fy, ry = fx;
   const c = Math.cos(yaw), s = Math.sin(yaw);
   const k = V3.S * SIZE[u.type] / 20;  // screen units per outline unit, on the ground plane
-  const moved = Math.hypot(u.x - u.px, u.y - u.py);
-  const rise = Math.max(-0.8, Math.min(0.8, (u.z - u.pz) * V3.ZS / (V3.S * Math.max(1, moved))));
-  const roll = u.order.action === "orbit" ? 0.55 : 0;
+  const moved = Math.hypot(o.x - o.px, o.y - o.py);
+  const rise = Math.max(-0.8, Math.min(0.8, (o.z - o.pz) * V3.ZS / (V3.S * Math.max(1, moved))));
+  const roll = o.order.action === "orbit" ? 0.55 : 0;
   // Screen vectors for one outline unit along the right wing and along the nose.
   const wing = [k * (rx * c - ry * s), k * V3.K * (rx * s + ry * c)];
   const nose = [k * (fx * c - fy * s), k * V3.K * (fx * s + fy * c)];
@@ -678,11 +1077,13 @@ function drawCraft(root, u, x, y, gx, gy, labels) {
   const wr = [wing[0] * Math.cos(roll), wing[1] * Math.cos(roll) + k * Math.sin(roll) * 0.7];
   const nr = [nose[0], nose[1] - k * rise];
 
-  svg("ellipse", { class: "craft-ring", cx: gx, cy: gy, rx: 15, ry: 7.5 }, g);
+  // Advanced rings the spot on the ground under a selected aircraft. Basic rings the aircraft itself:
+  // a first-time visitor reads a ring on the ground as belonging to whatever is drawn nearest to it.
+  svg("ellipse", basic() ? { class: "craft-ring", cx: x, cy: y + 1, rx: 20, ry: 11 } : { class: "craft-ring", cx: gx, cy: gy, rx: 15, ry: 7.5 }, g);
   svg("path", { class: "craft-shadow", d: ICON[u.type], transform: m(wing, nose, gx, gy) }, g);
   if (u.z > 0) svg("line", { class: "g3-stalk", x1: gx, y1: gy, x2: x, y2: y }, g);
-  if (moved > 0 || u.z !== u.pz) {
-    const [bx, by] = proj(u.px + 0.5, u.py + 0.5, u.pz);
+  if (moved > 0 || o.z !== o.pz) {
+    const [bx, by] = proj(o.px + 0.5, o.py + 0.5, o.pz);
     if (u.type === "missile") {
       svg("line", { class: "trail hot tail", x1: bx + (bx - x) * 0.7, y1: by + (by - y) * 0.7, x2: bx, y2: by }, g);
       svg("line", { class: "trail hot", x1: bx, y1: by, x2: x, y2: y }, g);
@@ -692,7 +1093,7 @@ function drawCraft(root, u, x, y, gx, gy, labels) {
   }
   svg("path", { class: "craft-under", d: ICON[u.type], transform: m(wr, nr, x, y + 2.4) }, g);
   svg("path", { class: "craft-top", d: ICON[u.type], transform: m(wr, nr, x, y) }, g);
-  labels.push({ x, y: y + 19, ax: x, ay: y + 8, text: `${u.id} · L${u.z}`, hp: u.hp, team: u.team });
+  labels.push({ x, y: y + 19, ax: x, ay: y + 8, text: basic() ? cap(plainKind(o)) : `${o.id} · L${o.z}`, hp: o.hp, team: o.team, id: o.id });
   svg("circle", { class: "hit", cx: x, cy: y + 3, r: 13 }, g);
   const pick = () => { if (!dragged) onUnit(u.id); };
   g.addEventListener("click", pick);
@@ -708,7 +1109,8 @@ function drawGround(root, u, n, labels) {
   const g = svg("g", { class: `gunit ${u.team}${u.id === selectedId ? " selected" : ""}${untracked(u) ? " untracked" : ""}`, role: "button", tabindex: 0 }, root);
   if (n) g.setAttribute("transform", `translate(${n * 22} ${-n * 6})`);
   g.dataset.id = u.id;
-  g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}`);
+  g.setAttribute("aria-label", basic() ? `${plainTitle(u)}, health ${Math.round(u.hp)}%`
+                                       : `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}`);
   const P = (dx, dy, z) => proj(u.x + dx, u.y + dy, z);
   const [bx, by] = P(0.5, 0.5, 0);
   svg("ellipse", { class: "craft-ring", cx: bx, cy: by, rx: 15, ry: 7.5 }, g);
@@ -753,7 +1155,7 @@ function drawGround(root, u, n, labels) {
     }
   }
   svg("circle", { class: "hit", cx: bx, cy: (by + top[1]) / 2, r: 13 }, g);
-  labels.push({ x: bx + n * 22, y: by + 12 - n * 6, ax: bx + n * 22, ay: by + 3 - n * 6, text: u.id, hp: u.hp, team: u.team });
+  labels.push({ x: bx + n * 22, y: by + 12 - n * 6, ax: bx + n * 22, ay: by + 3 - n * 6, text: basic() ? cap(plainKind(u)) : u.id, hp: u.hp, team: u.team, id: u.id });
   const pick = () => { if (!dragged) onUnit(u.id); };
   g.addEventListener("click", pick);
   g.addEventListener("keydown", (e) => {
@@ -763,21 +1165,30 @@ function drawGround(root, u, n, labels) {
 
 // Name labels are placed last, each nudged down or sideways until it is clear
 // of the ones already placed, with a thin leader line back to its unit.
-function placeLabels(root, labels) {
+// Basic also passes blocks: other units' figures and this round's flags, which a name should not
+// sit on top of either. A block is a box by its centre, and carries the id of the unit it belongs to.
+// While units are sliding between rounds (hold), each name keeps the place it had beside its unit and
+// rides along with it; the names are only sorted out again once everything has arrived. Without that
+// they hop from spot to spot on every frame of the slide.
+const heldSpots = new Map();  // unit id -> where its name sat, relative to where it would sit by default
+function placeLabels(root, labels, blocks = [], hold = false) {
   const layer = svg("g", { class: "labels", "pointer-events": "none" }, root);
   const placed = [];
   labels.sort((a, b) => a.y - b.y);
+  const wide = basic() ? 4.9 : 3.7, tall = basic() ? 14 : 12;
   for (const label of labels) {
-    const w = label.text.length * 3.7 + 6, h = 12;
+    const w = label.text.length * wide + 6, h = tall;
     const fit = (x, y) => [Math.max(w / 2, Math.min(V3.W - w / 2, x)), Math.min(V3.H - 6, y)];
     const clear = ([x, y]) => !placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < h);
-    const offsets = [[0, 0], [0, 12], [w * 0.7, 6], [-w * 0.7, 6], [0, 24], [w * 0.7, 18], [-w * 0.7, 18], [w, 0], [-w, 0], [0, 36]];
-    let spot = fit(label.x, label.y);
-    for (const [dx, dy] of offsets) {
-      const candidate = fit(label.x + dx, label.y + dy);
-      if (clear(candidate)) { spot = candidate; break; }
-    }
+    const open = ([x, y]) => !blocks.some((b) => b.id !== label.id && Math.abs(b.x - x) < (b.w + w) / 2 && Math.abs(b.y - (y - 3)) < (b.h + h) / 2);
+    const offsets = [[0, 0], [0, h], [w * 0.7, h / 2], [-w * 0.7, h / 2], [0, 2 * h], [w * 0.7, 1.5 * h], [-w * 0.7, 1.5 * h], [w, 0], [-w, 0], [0, 3 * h]];
+    // With figures and flags to steer round as well, look further out, including above the unit.
+    if (blocks.length) offsets.push([w, h], [-w, h], [w * 1.1, -h], [-w * 1.1, -h], [0, -2.6 * h], [w * 1.4, 2 * h], [-w * 1.4, 2 * h], [0, 4 * h], [w * 1.6, 0], [-w * 1.6, 0]);
+    const spots = offsets.map(([dx, dy]) => fit(label.x + dx, label.y + dy));
+    const was = hold ? heldSpots.get(label.id) : null;
+    const spot = was ? fit(label.x + was[0], label.y + was[1]) : spots.find((c) => clear(c) && open(c)) ?? spots.find(clear) ?? spots[0];
     const [x, y] = spot;
+    if (!hold && label.id) heldSpots.set(label.id, [x - label.x, y - label.y]);
     placed.push({ x, y, w });
     if (Math.abs(x - label.x) > 1 || Math.abs(y - label.y) > 1) {
       svg("line", { class: "leader", x1: label.ax, y1: label.ay, x2: x, y2: y - 6 }, layer);
@@ -795,6 +1206,17 @@ function render3d() {
   root.replaceChildren();
   const W = world.width, H = world.height, TOPZ = world.ceiling ?? 5;
   const line = (cls, a, b, parent = root) => svg("line", { class: cls, x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, parent);
+  // Basic slides each unit from where it was last round to where it is now. A unit lost this round
+  // keeps flying until the slide ends, so the hit lands where the eye already is.
+  const t = basic() ? glideT : 1;
+  let units = world.units;
+  if (t < 1) {
+    const fresh = new Set(world.events.filter((e) => e.tick === world.tick && (e.kind === "destroyed" || e.kind === "expended")).map((e) => e.detail));
+    units = world.units.map((u) => (u.alive || fresh.has(u.id)
+      ? { ...u, alive: true, x: u.px + (u.x - u.px) * t, y: u.py + (u.y - u.py) * t, z: u.pz + (u.z - u.pz) * t, src: u }
+      : u));
+  }
+  const shown = (id) => units.find((u) => u.id === id);
 
   const corners = [[0, 0], [W, 0], [W, H], [0, H]];
   const ground = svg("polygon", { class: "g3-ground", points: pts(corners.map(([x, y]) => proj(x, y, 0))) }, root);
@@ -811,7 +1233,7 @@ function render3d() {
   for (let j = 0; j <= H; j++) line("", proj(0, j, 0), proj(W, j, 0), grid);
 
   const flat = svg("g", { "pointer-events": "none" }, root);
-  for (const u of world.units) {
+  for (const u of units) {
     if (u.alive && u.type === "jammer" && u.jamRadius > 0) {
       const [x, y] = proj(u.x + 0.5, u.y + 0.5, 0);
       svg("ellipse", { class: "jam", cx: x, cy: y, rx: u.jamRadius * V3.S, ry: u.jamRadius * V3.S * V3.K }, flat);
@@ -838,14 +1260,14 @@ function render3d() {
   }
 
   const at = (u) => proj(u.x + 0.5, u.y + 0.5, u.z);
-  for (const u of world.units) {
+  for (const u of units) {
     if (!u.alive) continue;
     if ((u.order.action === "move" || u.order.action === "orbit") && u.order.tx >= 0 && u.order.ty >= 0) {
       line("route", at(u), proj(u.order.tx + 0.5, u.order.ty + 0.5, u.order.tz >= 0 ? u.order.tz : u.z), flat);
     }
-    const tgt = u.targetId ? unitById(u.targetId) : null;
+    const tgt = u.targetId ? shown(u.targetId) : null;
     if (tgt && tgt.alive) line("aim", at(u), at(tgt), flat);
-    const covered = u.order.action === "defend" ? unitById(u.order.targetId) : null;
+    const covered = u.order.action === "defend" ? shown(u.order.targetId) : null;
     if (covered && covered.alive) line("cover-line", at(u), at(covered), flat);
   }
 
@@ -855,9 +1277,10 @@ function render3d() {
     svg("ellipse", { class: "est", cx: x, cy: y, rx: r, ry: r * V3.K }, flat);
   }
   // Far units first so nearer ones draw over them.
-  const order = [...world.units].sort((a, b) => Number(a.alive) - Number(b.alive) || at(a)[2] - at(b)[2]);
+  const order = [...units].sort((a, b) => Number(a.alive) - Number(b.alive) || at(a)[2] - at(b)[2]);
   const stack = new Map();
   const labels = [];
+  const figures = [];  // where each living unit is drawn, for Basic's names to keep clear of
   for (const u of order) {
     const [gx, gy] = proj(u.x + 0.5, u.y + 0.5, 0);
     let [x, y] = at(u);
@@ -866,8 +1289,8 @@ function render3d() {
     const n = stack.get(key) ?? 0;
     stack.set(key, n + 1);
     x += n * 22; y -= n * 6;
-    if (u.alive && isAir(u)) { drawCraft(root, u, x, y, gx, gy, labels); continue; }
-    if (u.alive) { drawGround(root, u, n, labels); continue; }
+    if (u.alive && isAir(u)) { figures.push({ id: u.id, x, y, w: 26, h: 14 }); drawCraft(root, u, x, y, gx, gy, labels); continue; }
+    if (u.alive) { figures.push({ id: u.id, x: gx + n * 22, y: gy - 9 - n * 6, w: 16, h: 22 }); drawGround(root, u, n, labels); continue; }
     // Destroyed units stay as a small faded marker on the ground where they fell.
     [x, y] = [gx + n * 22, gy - n * 6];
     const el = makeUnit(u);
@@ -878,17 +1301,77 @@ function render3d() {
     dressUnit(el, u, Math.atan2(hx * c - hy * s, -(hx * s + hy * c) * V3.K) * 180 / Math.PI);
     root.appendChild(el);
   }
-  placeLabels(root, labels);
+  if (!basic()) { placeLabels(root, labels); return; }
+  const flags = t >= 1 ? layoutCallouts() : [];
+  placeLabels(root, labels, [...figures, ...flags.map((f) => ({ id: null, x: f.x, y: f.y - f.h / 2, w: f.w, h: f.h + 5 }))], t < 1);
+  drawCallouts(root, flags);
+}
+
+// Basic: this round's hits, blocks and losses as small flags on the map, each where it happened and
+// in the colour of the side that did it. Worked out before the names are placed, so names avoid them.
+function layoutCallouts() {
+  const flags = [];
+  for (const l of roundStory(world, null, Infinity)) {
+    const u = l.on ? unitById(l.on) : null;
+    if (!u) continue;
+    const word = l.what === "hit" ? "Hit!" : l.what === "blocked" ? "Blocked!" : l.what === "nolock" ? "No lock" : l.air ? "Shot down!" : "Destroyed!";
+    // Above an aircraft, above a ground model's mast, or just over the marker of something lost.
+    const flying = u.alive && isAir(u);
+    const [ax, ay] = proj(u.x + 0.5, u.y + 0.5, flying ? u.z : u.alive ? 1.5 : 0);
+    const w = word.length * 4.7 + 12, h = 13;
+    const x = Math.max(w / 2 + 2, Math.min(V3.W - w / 2 - 2, ax));
+    const y0 = Math.max(h + 2, ay - (flying ? 12 : 9));
+    // Two things in one place: the later flag goes above the earlier one.
+    let y = y0;
+    const taken = () => flags.some((f) => Math.abs(f.x - x) < (f.w + w) / 2 + 2 && Math.abs(f.y - y) < h + 2);
+    while (taken() && y - (h + 2) >= h + 2) y -= h + 2;
+    flags.push({ x, y, w, h, ax, word, team: l.team, tailed: y === y0 });
+  }
+  return flags;
+}
+
+function drawCallouts(root, flags) {
+  if (!flags.length) return;
+  const layer = svg("g", { class: "callouts" }, root);
+  // The flags make their entrance once, when the units arrive; later redraws just show them.
+  const first = poppedTick !== world.tick;
+  poppedTick = world.tick;
+  const f = (v) => v.toFixed(1);
+  for (const { x, y, w, h, ax, word, team, tailed } of flags) {
+    const g = svg("g", { class: `callout ${team ?? "plain"}${first ? " pop" : ""}` }, layer);
+    // A rounded tag; one that sits right on its unit has a small tail pointing down at it.
+    const x0 = x - w / 2, x1 = x + w / 2, y0 = y - h, tip = Math.max(x0 + 6, Math.min(x1 - 6, ax));
+    // It grows out of the point of its tail. The origin is in the map's own units, which every browser
+    // agrees on, rather than a percentage of the flag's box, which Safari has not always honoured.
+    g.style.transformOrigin = `${f(tip)}px ${f(y + 4.5)}px`;
+    const tail = tailed ? `H${f(tip + 3.5)} L${f(tip)},${f(y + 4.5)} L${f(tip - 3.5)},${f(y)} ` : "";
+    svg("path", { d: `M${f(x0 + 4)},${f(y0)} H${f(x1 - 4)} Q${f(x1)},${f(y0)} ${f(x1)},${f(y0 + 4)} V${f(y - 4)} Q${f(x1)},${f(y)} ${f(x1 - 4)},${f(y)} `
+      + tail + `H${f(x0 + 4)} Q${f(x0)},${f(y)} ${f(x0)},${f(y - 4)} V${f(y0 + 4)} Q${f(x0)},${f(y0)} ${f(x0 + 4)},${f(y0)} Z` }, g);
+    svg("text", { x: f(x), y: f(y - h / 2 + 0.5) }, g).textContent = word;
+  }
+}
+
+// Slide the 3D units from last round's positions to this round's, then draw the round's flags.
+function startGlide() {
+  const began = performance.now(), ms = 520;
+  glideT = 0;
+  const step = (now) => {
+    const t = Math.min(1, Math.max(0, (now - began) / ms));
+    glideT = t >= 1 ? 1 : 1 - (1 - t) ** 3;
+    glideFrame = t < 1 ? requestAnimationFrame(step) : 0;
+    if (world && shownView() === "3d") render3d();
+  };
+  glideFrame = requestAnimationFrame(step);
 }
 
 function renderMap() {
   // SVG elements have no .hidden property, so set the attribute.
-  $("map").toggleAttribute("hidden", view !== "2d");
-  $("map3d").toggleAttribute("hidden", view !== "3d");
+  $("map").toggleAttribute("hidden", shownView() !== "2d");
+  $("map3d").toggleAttribute("hidden", shownView() !== "3d");
   $("turnLeft").hidden = $("turnRight").hidden = view !== "3d";
   $("view2d").setAttribute("aria-pressed", String(view === "2d"));
   $("view3d").setAttribute("aria-pressed", String(view === "3d"));
-  if (view === "3d") { render3d(); return; }
+  if (shownView() === "3d") { render3d(); return; }
   buildGrid();
   $("map").classList.toggle("placing", mode === "move" || mode === "spawn");
 
@@ -1114,8 +1597,20 @@ function renderGame() {
 function render() {
   if (!world) return;
   if (selectedId && !unitById(selectedId)) { selectedId = null; mode = mode === "spawn" ? mode : null; }
+  if (world.tick !== seenTick) {
+    // One round on from the last draw: Basic slides the units there instead of jumping them.
+    const stepped = seenTick !== null && world.tick === seenTick + 1;
+    cancelAnimationFrame(glideFrame);
+    glideFrame = 0;
+    glideT = 1;
+    poppedTick = null;
+    if (note && note.tick !== world.tick) note = null;
+    if (stepped && basic() && !(calm && calm.matches)) startGlide();
+    seenTick = world.tick;
+  }
   $("tick").textContent = "Tick " + world.tick;
   renderGame();
+  renderBasic();
   renderMap();
   renderHint();
   renderSelected();
@@ -1124,6 +1619,7 @@ function render() {
 
 async function order(body) {
   mode = null;
+  unaided = false;
   const why = $("why").value.trim();
   if (why) body.reason = why;
   if (await api("/api/order", body)) $("why").value = "";
@@ -1153,7 +1649,264 @@ function renderDecisions() {
   }
 }
 
+// ---- Basic view ---------------------------------------------------------------
+// The same game and the same requests as Advanced. Basic only chooses what to show and how to say it:
+// the sentences come from the plain-words block above.
+
+// Someone who has handed their side to the computer is watching, not commanding.
+const watching = () => Boolean(game && (game.autopilot || watchStart));
+// The side the visitor is giving orders for right now, if any.
+const mySide = () => (game && !game.over && !watching() ? game.side : null);
+
+function renderBasic() {
+  $("levelBasic").setAttribute("aria-pressed", String(basic()));
+  $("levelAdvanced").setAttribute("aria-pressed", String(!basic()));
+  const live = Boolean(game && !game.over);
+  // The bar of round buttons has nothing to offer in Basic until a battle is on.
+  $("clock").hidden = basic() && !live;
+  if (!basic()) return;
+  $("bIdle").hidden = Boolean(game);
+  $("bGame").hidden = !game;
+  $("bChoices").hidden = live;
+  $("bControls").hidden = !game;
+  $("bPilot").hidden = !live;
+  $("bNext").disabled = $("bPlay").disabled = !live;
+  $("bPlay").textContent = playing ? "Pause" : "Auto-play";
+  $("bPlay").setAttribute("aria-pressed", String(playing));
+  renderCaption();
+  renderCard();
+  $("bResult").hidden = !(game && game.over);
+  $("bMore").hidden = !(game && game.over);
+  if (!game) return;
+
+  const me = mySide();
+  $("bRound").textContent = game.over ? `All ${game.limit} rounds played` : game.tick === 0 ? "Before round 1" : `Round ${game.tick} of ${game.limit}`;
+  const pips = $("bPips");
+  if (pips.children.length !== game.limit) {
+    pips.replaceChildren();
+    for (let i = 0; i < game.limit; i++) html("i", {}, pips);
+  }
+  [...pips.children].forEach((pip, i) => pip.classList.toggle("done", i < game.tick));
+  const strength = Math.round(strengthNow(world) * 100);
+  $("bStrengthLabel").textContent = game.over ? "Final strength" : me === "blue" ? "Your strength" : "Blue's strength";
+  $("bStrength").textContent = strength + "%";
+  $("bStrengthBar").style.width = strength + "%";
+  $("bPilot").textContent = game.autopilot ? "Take the controls" : "Let the computer play";
+
+  if (game.over) {
+    // A battle the computer played from start to finish sets the score to beat.
+    if (unaided && game.autopilot) {
+      par = game.missionValue;
+      try { localStorage.setItem("edge-sentry-par", String(par)); } catch { /* kept for this visit only */ }
+    }
+    unaided = false;
+    const told = resultStory(game, game.autopilot, par);
+    $("bVerdict").textContent = told.title;
+    $("bScoreLine").textContent = told.scoreLine;
+    $("bStats").textContent = told.stats;
+    $("bPar").textContent = told.aside;
+  }
+}
+
+function renderCaption() {
+  const list = $("bCaption");
+  list.hidden = Boolean(unitById(selectedId));
+  list.replaceChildren();
+  let lines;
+  if (!game) lines = [{ team: null, text: "Tap anything on the map to see what it is. Drag sideways to turn the map." }];
+  else if (game.tick === 0) lines = openingStory(game.side, watching());
+  else {
+    lines = roundStory(world, mySide());
+    if (!lines.length) lines = game.over ? [{ team: null, text: "Nothing landed in the last round." }] : quietStory(world, mySide());
+  }
+  if (note && game && !game.over && note.tick === world.tick) lines = [note, ...lines.filter((l) => l.text !== note.text)];
+  for (const l of lines) html("li", { className: l.team ?? "plain", textContent: say(l.text) }, list);
+}
+
+function renderCard() {
+  const u = unitById(selectedId);
+  const card = $("bCard");
+  card.hidden = !u;
+  card.replaceChildren();
+  if (!u) return;
+  const me = mySide();
+  const told = aboutUnit(u, world, me);
+  card.className = `b-card only-basic ${u.team}`;
+  const head = html("div", { className: "head" }, card);
+  html("h2", { textContent: told.title }, head);
+  html("button", { type: "button", className: "quiet", textContent: "Close", onclick: () => { selectedId = null; mode = null; render(); } }, head);
+  // Your own aircraft or base, picked up and waiting for a target.
+  if (mode === "launch") html("p", { className: "do", textContent: say(u.team === "blue" ? "Now tap the red unit it should go after." : "Now tap the blue unit it should attack.") }, card);
+  if (mode === "defend") html("p", { className: "do", textContent: say("Now tap the red unit the shield should stop.") }, card);
+  html("p", { textContent: told.about }, card);
+  if (u.alive) {
+    const health = html("div", { className: "health" }, card);
+    html("span", { textContent: "Health" }, health);
+    health.appendChild(meter(u.team === "blue" ? "blue" : "hostile", told.health / 100));
+    html("b", { textContent: told.health + "%" }, health);
+  }
+  for (const line of told.state) html("p", { className: "state", textContent: line }, card);
+
+  const acts = html("div", { className: "acts" }, card);
+  const add = (label, cls, fn) => html("button", { type: "button", textContent: label, className: cls, onclick: fn }, acts);
+  if (!me || !u.alive) return;
+  const it = plainName(u, world.units, me);
+  if (u.team === me) {
+    if (isAir(u) && u.targetId) add("Call it off", "", () => basicOrder([{ id: u.id, action: "cease" }], cap(`${it} is holding off.`)));
+  } else if (me === "blue") {
+    const fighter = world.units.find((o) => o.alive && o.team === "blue" && isAir(o) && canHit(o, u));
+    const base = world.units.find((o) => o.alive && o.team === "blue" && o.type === "hq");
+    if (fighter) add("Send fighter", "blue", () => basicOrder([{ id: fighter.id, action: "launch", target: u.id }], `Your fighter is ${isAir(u) ? "chasing" : "heading for"} ${it}.`));
+    if (base) add("Aim shield", "blue", () => basicOrder([{ id: base.id, action: "defend", target: u.id }], `Your shield is aimed at ${it}.`));
+  } else {
+    const strikers = world.units.filter((o) => o.alive && o.team === "red" && isAir(o) && canHit(o, u));
+    if (strikers.length) {
+      add(strikers.length === 1 ? "Attack it" : "Send everything at it", "red",
+        () => basicOrder(strikers.map((o) => ({ id: o.id, action: "launch", target: u.id })),
+          strikers.length === 1 ? cap(`${plainName(strikers[0], world.units, me)} is going after ${it}.`) : `${strikers.length} of your aircraft are going after ${it}.`));
+    }
+  }
+}
+
+// Send one or more orders, then say in a sentence what was ordered.
+async function basicOrder(orders, said) {
+  mode = null;
+  const side = mySide();
+  let ok = true;
+  for (const body of orders) ok = (await api("/api/order", body)) && ok;
+  if (ok) {
+    unaided = false;
+    selectedId = null;
+    note = { tick: world.tick, team: side, text: said };
+  }
+  render();
+}
+
+function onUnitBasic(id) {
+  const u = unitById(id);
+  if (!u) return;
+  setPlaying(false);
+  clearError();
+  const me = mySide();
+  const actor = unitById(selectedId);
+  // Second tap of two: the unit picked up a moment ago gets this one as its target.
+  if ((mode === "launch" || mode === "defend") && actor && id !== selectedId && u.alive && u.team !== actor.team) {
+    const who = plainName(actor, world.units, me), it = plainName(u, world.units, me);
+    if (mode === "launch" && !canHit(actor, u)) {
+      showError(cap(`${who} can only hit things on the ground. Pick a ground unit instead.`));
+      return;
+    }
+    // A defender's confirmation uses the words a quiet round uses for the same thing, so it is never said twice.
+    const going = actor.team === "blue" ? (isAir(u) ? "is chasing" : "is heading for") : "is going after";
+    basicOrder([{ id: actor.id, action: mode, target: id }], mode === "launch" ? cap(`${who} ${going} ${it}.`) : `Your shield is aimed at ${it}.`);
+    return;
+  }
+  if (selectedId === id) { selectedId = null; mode = null; render(); return; }
+  selectedId = id;
+  // Tapping one of your own aircraft, or your base, picks it up ready for a target.
+  mode = me && u.alive && u.team === me ? (isAir(u) ? "launch" : u.type === "hq" ? "defend" : null) : null;
+  render();
+}
+
+// Rounds that advance on their own: quiet ones pass quickly, eventful ones wait to be read.
+function setPlaying(on, firstWait = 300) {
+  playing = Boolean(on && game && !game.over && basic());
+  clearTimeout(playTimer);
+  if (playing) playTimer = setTimeout(autoStep, firstWait);
+  $("bPlay").textContent = playing ? "Pause" : "Auto-play";
+  $("bPlay").setAttribute("aria-pressed", String(playing));
+}
+async function autoStep() {
+  if (!playing) return;
+  if (busy || document.hidden) { playTimer = setTimeout(autoStep, 400); return; }
+  const ok = await api("/api/tick", { n: 1 });
+  if (!playing) return;
+  if (!ok || !game || game.over) { setPlaying(false); return; }
+  const eventful = roundStory(world, null).length > 0;
+  playTimer = setTimeout(autoStep, eventful ? 2800 : 1700);
+}
+
+async function startBasic(kind) {
+  setPlaying(false);
+  selectedId = null; mode = null; enemyOrders = []; autoOrders = []; note = null;
+  unaided = false;
+  watchStart = kind === "watch";
+  try {
+    if (!(await api("/api/game/start", { side: kind === "red" ? "red" : "blue" }))) return;
+    if (kind !== "watch") return;
+    if (!(await api("/api/game/autopilot", { on: true }))) return;
+    unaided = true;
+  } finally {
+    watchStart = false;
+    if (!window.matchMedia("(min-width: 1000px)").matches) $("bLegend").open = false;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    render();
+  }
+  // Leave the starting line-up on screen long enough to be read, then begin.
+  setPlaying(true, 2200);
+}
+
+function setLevel(next) {
+  if (next === level) return;
+  level = next;
+  document.documentElement.setAttribute("data-level", level);
+  try { localStorage.setItem("edge-sentry-level", level); } catch { /* not saved; the switch still works */ }
+  try {
+    // The switch now speaks for the visitor, so a ?level= in the address must not undo it on reload.
+    const url = new URL(location.href);
+    if (url.searchParams.has("level")) { url.searchParams.delete("level"); history.replaceState(null, "", url); }
+  } catch { /* the address stays as it was */ }
+  setPlaying(false);
+  mode = null;
+  cancelAnimationFrame(glideFrame);
+  glideFrame = 0;
+  glideT = 1;
+  clearError();
+  render();
+}
+
+// The legend is built once from the same words the cards use, with the map's own outlines as icons.
+function buildLegend() {
+  const icon = (parent, draw) => {
+    const el = svg("svg", { viewBox: "-12 -12 24 24", "aria-hidden": "true" }, parent);
+    draw(el);
+    return el;
+  };
+  const pictures = {
+    hq: (el) => { svg("rect", { x: -7, y: -1, width: 14, height: 9, class: "wash" }, el); svg("path", { d: "M0,-1 V-10 L6,-8 L0,-6", fill: "none", "stroke-width": 1.4 }, el); },
+    sensor: (el) => { svg("path", { d: "M0,9 V-2 M-4,9 H4", fill: "none", "stroke-width": 1.4 }, el); svg("ellipse", { cx: 0, cy: -4, rx: 7.5, ry: 3.4, transform: "rotate(-25 0 -4)", stroke: "none" }, el); },
+    relay: (el) => { svg("path", { d: "M-6,9 L0,-10 L6,9 M-3.2,0 H3.2 M-4.7,5 H4.7", fill: "none", "stroke-width": 1.4, "stroke-linejoin": "round" }, el); svg("circle", { cx: 0, cy: -10, r: 1.6, stroke: "none" }, el); },
+    jammer: (el) => { svg("rect", { x: -5, y: 2, width: 10, height: 7, class: "wash" }, el); svg("path", { d: "M0,2 V-4 M-4,-9 A6,6 0 0 0 -4,1 M4,-9 A6,6 0 0 1 4,1 M-7.5,-11 A9,9 0 0 0 -7.5,3 M7.5,-11 A9,9 0 0 1 7.5,3", fill: "none", "stroke-width": 1.2, "stroke-linecap": "round" }, el); },
+  };
+  for (const team of ["blue", "red"]) {
+    const list = $(team === "blue" ? "bLegendBlue" : "bLegendRed");
+    for (const type of LEGEND[team]) {
+      const li = html("li", {}, list);
+      icon(li, ICON[type] ? (el) => svg("path", { d: ICON[type], stroke: "none" }, el) : pictures[type]);
+      const words = html("div", {}, li);
+      html("b", { textContent: cap(plainKind({ team, type })) }, words);
+      html("span", { textContent: aboutKind(team, type) }, words);
+    }
+  }
+  const samples = {
+    height: (el) => { svg("path", { d: "M0,-4 V6", "stroke-width": 1 }, el); svg("ellipse", { cx: 0, cy: 7, rx: 6, ry: 2.2, fill: "var(--ink)", stroke: "none", opacity: 0.25 }, el); svg("path", { d: ICON.jet, transform: "translate(0 -5) scale(0.5)", fill: "var(--ink-soft)", stroke: "none" }, el); },
+    health: (el) => { svg("rect", { x: -9, y: -1.5, width: 18, height: 3, fill: "var(--line)", stroke: "none" }, el); svg("rect", { x: -9, y: -1.5, width: 12, height: 3, fill: "var(--ink-soft)", stroke: "none" }, el); },
+    aim: (el) => svg("path", { d: "M-9,6 L9,-6", stroke: "var(--red)", "stroke-width": 1.6 }, el),
+    shield: (el) => svg("path", { d: "M-9,6 L9,-6", stroke: "var(--blue)", "stroke-width": 1.8, "stroke-dasharray": "5 3" }, el),
+    jam: (el) => svg("ellipse", { cx: 0, cy: 0, rx: 10, ry: 6, fill: "var(--amber)", "fill-opacity": 0.16, stroke: "var(--amber)", "stroke-width": 1.2, "stroke-dasharray": "4 3" }, el),
+    hill: (el) => { svg("path", { d: "M-8,5 V-1 M8,5 V-1 M0,9 V3", "stroke-width": 1 }, el); svg("path", { d: "M-8,-1 L0,-5 L8,-1 L0,3 Z", fill: "var(--line)", "stroke-width": 1 }, el); },
+    turn: (el) => svg("path", { d: "M-8,2 A8,5 0 0 1 8,2 M8,2 L4.5,-1.5 M8,2 L4,4.5", "stroke-width": 1.4, "stroke-linecap": "round" }, el),
+  };
+  for (const [key, text] of MAP_NOTES) {
+    const li = html("li", {}, $("bLegendMap"));
+    icon(li, samples[key]);
+    html("span", { textContent: text }, li);
+  }
+  for (const text of SCORE_NOTES) html("li", { className: "wide", textContent: text }, $("bLegendScore"));
+}
+
 function onUnit(id) {
+  if (basic()) { onUnitBasic(id); return; }
   if ((mode === "launch" || mode === "defend") && selectedId && id !== selectedId) {
     order({ id: selectedId, action: mode, target: id });
     return;
@@ -1164,6 +1917,11 @@ function onUnit(id) {
 }
 
 async function onCell(x, y) {
+  if (basic()) {
+    // Basic has no orders that need a square: a tap on open ground just puts the tapped unit down.
+    if (selectedId || mode) { selectedId = null; mode = null; render(); }
+    return;
+  }
   if (mode === "move" && selectedId) {
     await order({ id: selectedId, action: "move", tx: x, ty: y });
   } else if (mode === "spawn") {
@@ -1177,9 +1935,9 @@ async function onCell(x, y) {
 
 $("tick1").onclick = () => api("/api/tick", { n: 1 });
 $("tick5").onclick = () => api("/api/tick", { n: 5 });
-$("reset").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; autoOrders = []; await api("/api/reset", {}); };
+$("reset").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; autoOrders = []; note = null; unaided = false; await api("/api/reset", {}); };
 async function startGame(side) {
-  selectedId = null; mode = null; enemyOrders = []; autoOrders = [];
+  selectedId = null; mode = null; enemyOrders = []; autoOrders = []; note = null; unaided = false;
   await api("/api/game/start", { side });
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -1188,10 +1946,43 @@ $("playRed").onclick = () => startGame("red");
 $("again").onclick = () => game && startGame(game.side);
 $("autoRed").onclick = () => api("/api/auto", { red: !auto.red });
 $("autoBlue").onclick = () => api("/api/auto", { blue: !auto.blue });
-$("autopilot").onclick = () => game && api("/api/game/autopilot", { on: !game.autopilot });
+$("autopilot").onclick = () => { unaided = false; return game && api("/api/game/autopilot", { on: !game.autopilot }); };
 $("switchSides").onclick = () => game && startGame(game.side === "blue" ? "red" : "blue");
 $("leaveGame").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; autoOrders = []; await api("/api/game/end", {}); };
 $("cancel").onclick = () => setMode(null);
+$("levelBasic").onclick = () => setLevel("basic");
+$("levelAdvanced").onclick = () => setLevel("advanced");
+$("bOpenAdvanced").onclick = () => setLevel("advanced");
+$("bWatch").onclick = () => startBasic("watch");
+$("bDefend").onclick = () => startBasic("blue");
+$("bAttack").onclick = () => startBasic("red");
+$("bNext").onclick = () => {
+  // While rounds are playing on their own, this just brings the next one forward.
+  if (playing) { clearTimeout(playTimer); autoStep(); } else api("/api/tick", { n: 1 });
+};
+$("bPlay").onclick = () => setPlaying(!playing, 0);
+$("bPilot").onclick = async () => {
+  if (!game) return;
+  const on = !game.autopilot;
+  setPlaying(false);
+  unaided = false;
+  selectedId = null; mode = null;
+  if (await api("/api/game/autopilot", { on })) {
+    const side = game.side === "blue" ? "blue" : "red";
+    note = { tick: world.tick, team: null, text: on ? `The computer is playing ${side} again. Press Auto-play to watch.`
+      : side === "blue" ? "You are in command of blue. Tap a red unit to send your fighter after it or aim your shield at it."
+                        : "You are in command of red. Tap one of your aircraft, then tap the blue unit it should attack." };
+    render();
+  }
+};
+$("bLeave").onclick = async () => {
+  setPlaying(false);
+  selectedId = null; mode = null; enemyOrders = []; autoOrders = []; note = null; unaided = false;
+  // Back to a clean start screen: end the battle, then put the map back as it began.
+  if (await api("/api/game/end", {})) await api("/api/reset", {});
+  $("bLegend").open = true;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
 // The order summaries fold to three lines; tap or press Enter to open or fold one.
 for (const el of document.querySelectorAll(".orders-said")) {
   const toggle = () => el.setAttribute("aria-expanded", String(el.classList.toggle("open")));
@@ -1211,8 +2002,9 @@ document.addEventListener("keydown", (e) => {
   const typing = el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA");
   const onControl = el && (el.tagName === "BUTTON" || el.getAttribute?.("role") === "button" || el.tagName === "SUMMARY");
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === " " && !onControl) { e.preventDefault(); if (!$("tick1").disabled) $("tick1").click(); }
-  if (view === "3d" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+  const next = $(basic() ? "bNext" : "tick1");
+  if (e.key === " " && !onControl) { e.preventDefault(); if (!next.disabled && !$("clock").hidden) next.click(); }
+  if (shownView() === "3d" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
     e.preventDefault();
     yaw += (e.key === "ArrowLeft" ? -1 : 1) * Math.PI / 16;
     render();
@@ -1241,6 +2033,7 @@ $("spawnGo").onclick = () => { selectedId = null; setMode("spawn"); document.que
 $("spawnTeam").onchange = $("spawnType").onchange = () => renderHint();
 $("noise").onchange = $("fusion").onchange = () => api("/api/sensing", { noise: Number($("noise").value), fusion: $("fusion").value === "on" });
 
+buildLegend();
 api("/api/state");
 </script>
 </body>

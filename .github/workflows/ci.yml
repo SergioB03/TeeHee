@@ -44,8 +44,10 @@ jobs:
         run: npm run eval:rl
       - name: Software-in-the-loop (simulator plus a separate edge-node over TCP)
         run: npm run sil
-      - name: Web console with twelve visitors at once (both sides, autopilot on and off, sandbox)
+      - name: Web console (twelve visitors at once; then the Basic view's words against real battles, and both levels of the real page in headless Chrome)
         run: npm run test:web
+        env:
+          EDGE_BROWSER: required   # the runner has Chrome; without this the browser checks would be skipped, not failed
       - name: Web console smoke test
         run: |
           PORT=3100 node web/server.mjs &
