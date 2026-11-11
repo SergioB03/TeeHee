@@ -17,7 +17,8 @@
     "sil": "python3 sil/run_sil.py --rollouts 12 --check --no-write",
     "eval:tracking": "python3 ml/tracking_eval.py --rollouts 20 --check --no-write",
     "eval:opponent": "python3 ml/opponent_eval.py --rollouts 20 --check --no-write",
-    "trace": "python3 tools/trace.py --check"
+    "trace": "python3 tools/trace.py --check",
+    "docs:check": "python3 tools/check_docs.py"
   },
   "dependencies": {
     "@grok/agent-sdk": "^0.6.0",

@@ -87,7 +87,7 @@ The agent is graded the same way. `evals/outcome.eval.ts` seeds eight scripted s
 - A jet that parks next to HQ without firing reads as benign, because in the training data parked jets rarely attack. A human would keep watching it. This is one of the two scripted scenarios the models fail.
 - A distant jammer that is about to drive into range is called hostile at tick 0, before it has moved. The label is technically right (it does jam a relay within the horizon), but the model cannot know that yet, so it is over-calling stationary jammers. This is the other failed scenario.
 - On aircraft and missiles alone, the heuristic that reads each contact's real target ranks slightly better in 3D (0.942 vs 0.938 AUC). Altitude added behaviors (bombers that never descend, harmless descents) that observable motion separates less cleanly.
-- Track quality only weakens with stealth, range and terrain; a contact is never lost entirely. Real sensors drop tracks.
+- The model was trained on the perfect picture, where track quality only weakens with stealth, range and terrain and a contact is never lost. With sensing noise on, contacts are missed and tracks are dropped, and the model loses accuracy until it is retrained on that picture (see Sensing and tracking).
 - One-step lookahead is greedy, so it is a strong reference for outcomes, not a true ceiling. On one scripted scenario the learned policy beats it.
 - The outcome policy assumes the contact's class (jet, stealth fighter, bomber, drone, missile, jammer) is known.
 - The simulator is small and its hit roll is a deterministic hash, so these numbers describe this sandbox, not the real world.

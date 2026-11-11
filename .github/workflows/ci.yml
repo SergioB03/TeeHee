@@ -24,6 +24,8 @@ jobs:
         run: npm test
       - name: Requirements trace (every requirement names a check that still exists)
         run: npm run trace
+      - name: READMEs agree with the generated reports, and their links resolve
+        run: npm run docs:check
       - name: Model evaluation (held-out metrics, scenarios, C++/Python parity)
         run: npm run eval:model
       - name: Results file is up to date

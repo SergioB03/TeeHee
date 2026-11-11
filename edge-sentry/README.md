@@ -2,15 +2,17 @@
 
 A small 3D air and electronic-warfare sandbox with trained threat models, an autonomy planner that runs on a separate edge node, an LLM ops agent, and a console for phone and desktop.
 
-**Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (best on a phone; the sandbox is shared, so press Reset scenario to start clean)
+**Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (phone or desktop; every visitor gets a private sandbox)
 
-![Phone console, 3D view: playing blue, the stealth fighter is sent after a bomber and point defense is put on a missile while red attacks at different altitudes](docs/demo.gif)
+<img src="docs/demo.gif" alt="Phone console, 3D view: blue's autopilot runs the defense, giving a reason for each order, while red's strike comes in at different altitudes" width="320">
 
 Blue sensors watch red contacts on a 12×12 map with six altitude levels. Jets, stealth fighters, bombers, drones and missiles each fly differently: speed, climb rate, ceiling, how visible they are to sensors, and how low they must come to hit. Low flyers hide behind terrain, and point defense needs a usable track to stop anything. The question the project answers each tick: **which contacts are about to hurt us, and which one do we deal with first?** A C++ simulator produces the world, a small neural network trained on simulator rollouts scores every contact, and an agent (or you, from your phone) reads the picture and issues orders. Every order is written to a decision log with the threat picture it was made on.
 
 Simulation and wargame math only. No real RF jammer designs, seeker guidance, or offensive cyber tooling.
 
 ## Results
+
+### The threat model
 
 **Prediction.** The model predicts whether a contact will harm a blue asset within 5 ticks, using only what blue could observe: motion, a few ticks of track history, emissions, and effects on blue units. It never sees a contact's orders or target. On 200 held-out random 3D scenarios (12,718 contact-ticks):
 
@@ -34,6 +36,10 @@ Simulation and wargame math only. No real RF jammer designs, seeker guidance, or
 | One-step lookahead (uses the simulator's future) | 0.980 | 0.84 |
 
 Mission value is the average over every tick and blue asset of health × integrity. The learned model recovers 70% of the gain that lookahead gets over doing nothing, and the sequence model 74%.
+
+**Does a recurrent model need the hand-built history?** No. The sequence model is a 16-unit GRU trained with PyTorch that gets only the 20 inputs describing the current tick and has to remember the track itself. It matches the default model on held-out AUC (0.967 vs 0.968), passes the same number of scripted scenarios, and is slightly ahead on outcomes (0.954 vs 0.951 mission value). That is a tie within noise, reached with less feature engineering. The default stays the smaller model; `--scorer sequence` switches to the GRU, and every track reports both scores.
+
+### The autonomy planner
 
 **Autonomy.** A planner (`native/src/autonomy.cpp`) runs blue's whole defense from the observation message alone: which contact point defense covers each tick, and how the fighter flies (patrol, shadow, intercept, engage, return to base). It estimates the loss each contact will cause at each coming tick, gives point defense to whatever can do the most damage next, and sends the fighter after the contact whose removal saves the most. Over 150 rollouts where blue has point defense and one fighter:
 
@@ -74,11 +80,7 @@ The third row is where the planner stood at first: it lost its fighter in almost
 
 Both were tuned on separate battles and then measured on these, and neither changes the 150-rollout table above (0.974, 0.11). Going one step further and treating a fighter that closes to two cells as hostile before it fires gets 0.832 and 94% here but shoots down more aircraft that never attacked (0.19 against 0.11), so it is not the default. Full table, with each lesson on its own: [`ml/OPPONENT.md`](ml/OPPONENT.md).
 
-**ROS 2.** The same observation and plan are also typed ROS 2 messages ([`ros2/`](ros2/README.md)): the simulator and the planner run as two separate nodes that talk over topics. CI builds both packages in the official ROS 2 Jazzy container, runs the two nodes, and checks from a third node that every plan on the topic is exactly what the planner gives for that observation and that the orders take effect.
-
-**Docker.** `docker compose up` runs the console and the planner with nothing installed but Docker ([`docker/`](docker/README.md)). The planner's image is a single 2 MB statically linked file on an empty base, and it builds for arm64 without emulating a compiler. `docker compose run --rm sil` repeats the software-in-the-loop test with a real boundary: the simulator in one container, the planner in another held to half a CPU core and 32 MB, talking only over the network. Every container runs as a non-root user on a read-only filesystem with no Linux capabilities, and CI checks that from outside, down to what the kernel reports.
-
-**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 43 requirements (rules of engagement, interface, sensing, model, simulator, web console, containers) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
+### Sensing
 
 **Noisy sensors.** Everything above uses a perfect picture. With sensing noise on (`edge-sim sensing --noise 0.7`), each sensor detects a contact only some of the time and reports a position that is a little off, worse at range, at low signature, behind cover and under jamming. A per-contact Kalman filter fuses the sensors' reports, rides through gaps of up to three ticks, then drops the track. The threat model and the planner see only that picture. Over 100 rollouts under heavy noise:
 
@@ -91,31 +93,42 @@ Both were tuned on separate battles and then measured on these, and neither chan
 
 The tracker halves the position error and almost never loses a contact. The shipped threat model, trained only on the perfect picture, still loses 0.06 of AUC under heavy noise; retraining the same network on tracker output at mixed noise levels wins most of that back (0.963) and costs 0.001 on the perfect picture. That retrained model is an experiment and is not the default yet, so its effect on mission value is not measured. Detections also arrive already matched to a contact: telling contacts apart is not modelled. Full table: [`ml/TRACKING.md`](ml/TRACKING.md).
 
-**Does a recurrent model need the hand-built history?** No. The sequence model is a 16-unit GRU trained with PyTorch that gets only the 20 inputs describing the current tick and has to remember the track itself. It matches the default model on held-out AUC (0.967 vs 0.968), passes the same number of scripted scenarios, and is slightly ahead on outcomes (0.954 vs 0.951 mission value). That is a tie within noise, reached with less feature engineering. The default stays the smaller model; `--scorer sequence` switches to the GRU, and every track reports both scores.
+### Where it falls short
 
-Where it falls short: on aircraft and missiles alone, the heuristic that is allowed to read each contact's real target still ranks slightly better (0.942 vs 0.938 AUC); the models win overall and on every outcome measure. Both models fail the same two scripted scenarios: a jet that parks beside HQ without firing (read as benign; a human would keep watching) and a distant jammer that they call hostile before it has moved. They also need a tick or two of motion before they can read intent. Moving to 3D made the task harder: AUC was 0.978 on the earlier flat simulator.
+- **A heuristic with inside information still ranks aircraft slightly better.** On aircraft and missiles alone, the heuristic that is allowed to read each contact's real target scores 0.942 AUC against the model's 0.938. The models win overall and on every outcome measure.
+- **Two scripted scenarios fool both models.** A jet that parks beside HQ without firing is read as benign (a human would keep watching), and a distant jammer is called hostile before it has moved. They also need a tick or two of motion before they can read intent.
+- **3D made the task harder.** AUC was 0.978 on the earlier flat simulator.
+- **Nothing has been timed on real edge hardware.** The arm64 build is tested under emulation and in a container held to a small budget, which shows it fits and behaves the same, not how fast a Pi or Jetson runs it.
+- **The shipped threat model was trained on a perfect picture.** Under heavy sensor noise it loses accuracy; the retrained version is an experiment and not the default. Detections also arrive already matched to a contact.
+- **Two planner ideas did not pay off.** Flying to where a target will be, and waiting at a forward patrol station, made no measurable difference. Both are reported rather than removed.
+- **It is a small sandbox.** The numbers describe this simulator and its scenario generator, not the real world.
 
-Full tables and method: [`ml/RESULTS.md`](ml/RESULTS.md), [`ml/OUTCOMES.md`](ml/OUTCOMES.md), [`ml/README.md`](ml/README.md). Every number is regenerated by scripts in `ml/`, and CI fails if they slip.
+Full tables and method: [`ml/RESULTS.md`](ml/RESULTS.md), [`ml/OUTCOMES.md`](ml/OUTCOMES.md), [`ml/README.md`](ml/README.md). Every number is regenerated by scripts in `ml/`, CI fails if a result slips below its floor, and `tools/check_docs.py` fails if a README goes on quoting a number its report no longer has.
+
+## Built to be checked
+
+**ROS 2.** The same observation and plan are also typed ROS 2 messages ([`ros2/`](ros2/README.md)): the simulator and the planner run as two separate nodes that talk over topics. CI builds both packages in the official ROS 2 Jazzy container, runs the two nodes, and checks from a third node that every plan on the topic is exactly what the planner gives for that observation and that the orders take effect.
+
+**Docker.** `docker compose up` runs the console and the planner with nothing installed but Docker ([`docker/`](docker/README.md)). The planner's image is a single 2 MB statically linked file on an empty base, and it builds for arm64 without emulating a compiler. `docker compose run --rm sil` repeats the software-in-the-loop test with a real boundary: the simulator in one container, the planner in another held to half a CPU core and 32 MB, talking only over the network. Every container runs as a non-root user on a read-only filesystem with no Linux capabilities, and CI checks that from outside, down to what the kernel reports.
+
+**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 43 requirements (rules of engagement, interface, sensing, model, simulator, web console, containers) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
 
 ## How it fits together
 
 ```mermaid
-flowchart LR
+flowchart TD
+    R[Rollouts and outcome labels] -->|ml/train.py| WT[Model weights<br/>compiled into edge-sim]
     subgraph sim["edge-sim (C++17)"]
-        W[World and tick loop] --> F[Observed features]
-        F --> M[Threat model<br/>small neural network]
+        W[World and tick loop] --> S[Sensing and<br/>Kalman tracker]
+        S --> M[Threat model]
     end
-    R[Rollouts and outcome labels] -->|ml/train.py| WT[model_weights.hpp]
     WT --> M
-    M --> J[world.json and CLI output]
-    J --> A[Ops agent tools<br/>TypeScript, Agent SDK]
-    J --> P[Phone console<br/>zero-dependency Node server]
-    J -->|observation message| N[Autonomy planner<br/>inside edge-sim, or edge-node over TCP]
-    N -->|orders + reasons| W
-    A -->|orders + reasons| W
-    P -->|orders + reasons| W
-    W --> D[Decision log<br/>order, actor, reason, picture]
     W --> R
+    M -->|observation message| N[Autonomy planner<br/>in edge-sim, edge-node or ROS 2]
+    M -->|threat picture| C[Web console<br/>and ops agent]
+    N -->|orders + reasons| W
+    C -->|orders + reasons| W
+    W --> D[Decision log<br/>order, actor, reason, picture]
 ```
 
 | Path | What it is |
@@ -174,6 +187,7 @@ Tests and model evaluation (Python standard library only):
 npm test               # 122 CLI checks and 47 planner checks
 npm run test:web       # twelve visitors at once on the web console: both sides, autopilot on and off
 npm run trace          # every requirement still names a check that exists
+npm run docs:check     # the numbers quoted in the READMEs still match the generated reports
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
 npm run eval:autonomy  # the planner against simpler defense rules (quick version)
