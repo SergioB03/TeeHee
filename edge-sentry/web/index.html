@@ -205,6 +205,51 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 .clock div { max-width: 520px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
 .clock button { min-height: 50px; font-size: 16px; }
 
+/* 3D aircraft figures */
+.craft { cursor: pointer; }
+.craft text { pointer-events: none; font-family: var(--label); }
+.craft .craft-top { stroke: var(--ink); stroke-width: 0.9; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.craft.blue .craft-top { fill: var(--blue); }
+.craft.red .craft-top { fill: var(--red); }
+.craft .craft-under { fill: var(--ink); opacity: 0.6; }
+.craft .craft-shadow { fill: var(--ink); opacity: 0.17; }
+.craft .trail { stroke-width: 1.3; stroke-linecap: round; opacity: 0.5; fill: none; }
+.craft.blue .trail { stroke: var(--blue); }
+.craft.red .trail { stroke: var(--red); }
+.craft .trail.hot { stroke: var(--amber); stroke-width: 3; opacity: 0.85; }
+.craft .trail.hot.tail { stroke-width: 1.6; opacity: 0.45; }
+.craft .craft-id { font-size: 7px; font-weight: 600; fill: var(--ink); text-anchor: middle; paint-order: stroke; stroke: var(--paper); stroke-width: 2.5px; }
+.craft .craft-alt { font-size: 8px; font-weight: 600; fill: var(--ink-soft); paint-order: stroke; stroke: var(--paper); stroke-width: 2.5px; }
+.craft .craft-ring { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0; }
+.craft.selected .craft-ring { opacity: 1; }
+.craft.selected .craft-top { stroke-width: 2; }
+.craft .hp-track { fill: var(--line); }
+.craft.blue .hp { fill: var(--blue); }
+.craft.red .hp { fill: var(--red); }
+.craft .hit { fill: transparent; }
+.placing .craft { pointer-events: none; }
+.keys { display: none; }
+
+/* Wide screens: big map on the left that stays in view, everything else in a panel on the right */
+@media (min-width: 1000px) {
+  body { padding-bottom: 0; }
+  .shell {
+    max-width: 1360px; padding: 0 28px 28px;
+    display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.6fr);
+    grid-template-rows: auto auto 1fr; column-gap: 36px;
+  }
+  .topbar { grid-column: 1 / -1; }
+  .stage { grid-column: 1; grid-row: 2 / 4; position: sticky; top: 0; align-self: start; padding-top: 4px; }
+  #mode { grid-column: 2; grid-row: 2; }
+  .side { grid-column: 2; grid-row: 3; }
+  .viewbar { margin-top: 0; }
+  #map, #map3d { max-height: calc(100vh - 300px); }
+  .clock { position: static; border: 0; background: none; padding: 12px 0 0; }
+  .clock div { max-width: none; }
+  .keys { display: block; margin: 8px 0 0; color: var(--ink-soft); font-size: 13px; }
+  .selected { margin-top: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) { .unit { transition: none; } button:active { transform: none; } }
 </style>
 </head>
@@ -238,6 +283,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </section>
 
+  <div class="stage">
   <div class="viewbar">
     <div class="seg" role="group" aria-label="Map view">
       <button id="view2d" type="button" aria-pressed="true">Flat map</button>
@@ -260,6 +306,14 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 
   <p class="hint" id="hint"><span id="hintText" aria-live="polite">Loading the sandbox.</span><button class="quiet" id="cancel" type="button" hidden>Cancel</button></p>
   <p class="error" id="error" role="alert" hidden></p>
+  <div class="clock"><div>
+    <button class="go" id="tick1" type="button">Advance 1 tick</button>
+    <button id="tick5" type="button">Advance 5</button>
+  </div></div>
+  <p class="keys">Keyboard: Space advances a tick, the left and right arrows turn the 3D view.</p>
+  </div>
+
+  <div class="side">
 
   <section class="selected" id="selected" hidden>
     <h2 id="selName"></h2>
@@ -310,13 +364,11 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </details>
 
-  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows altitude as height; drag sideways to turn it. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
+  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows aircraft as figures at their altitude, each with a shadow on the ground below it, nose up or down as it climbs or dives, banked while it orbits, and a missile leaves a bright trail; drag sideways to turn the view. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
+  </div>
 </div>
 
-<div class="clock"><div>
-  <button class="go" id="tick1" type="button">Advance 1 tick</button>
-  <button id="tick5" type="button">Advance 5</button>
-</div></div>
+
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -328,6 +380,8 @@ const KIND = { hq: "headquarters", sensor: "sensor", relay: "relay", jammer: "ja
 // Highest altitude level each aircraft type can reach (the simulator enforces it).
 const CEIL = { jet: 5, stealth: 5, bomber: 5, drone: 2, missile: 5 };
 const isAir = (u) => u.type in CEIL;
+// Size of each aircraft figure in the 3D view, in map cells.
+const SIZE = { jet: 1.7, stealth: 1.9, bomber: 2.4, drone: 1.45, missile: 1.3 };
 // Generic top-down silhouettes, nose up, in a 20 x 20 box.
 const ICON = {
   jet: "M0,-9 L2,-3 L8,3 L8,5 L2,3 L2,7 L4,9 L-4,9 L-2,7 L-2,3 L-8,5 L-8,3 L-2,-3 Z",
@@ -343,10 +397,10 @@ let mode = null; // null | "move" | "launch" | "defend" | "spawn"
 let decisions = [];
 let game = null;          // { side, tick, limit, over, missionValue, hits, blocked, lost } while a game is on
 let enemyOrders = [];     // what the computer opponent ordered on the last advance
-let view = "2d";          // "2d" flat map or "3d" battlefield
+let view = "3d";          // "2d" flat map or "3d" battlefield
 let yaw = -0.55;          // 3D view rotation about the vertical axis, radians
 try {
-  view = localStorage.getItem("edge-sentry-view") === "3d" ? "3d" : "2d";
+  view = localStorage.getItem("edge-sentry-view") === "2d" ? "2d" : "3d";
 } catch { /* storage can be unavailable; the default view is fine */ }
 
 // Each visitor gets their own sandbox: a random id kept in this browser.
@@ -460,23 +514,34 @@ function buildGrid() {
 }
 
 function makeUnit(u) {
-  const g = svg("g", { class: "unit " + u.team, role: "button", tabindex: 0 });
+  const air = Boolean(ICON[u.type]);
+  const g = svg("g", { class: "unit " + u.team + (air ? " air" : ""), role: "button", tabindex: 0 });
   g.dataset.sig = u.team + ":" + u.type;
+  // Aircraft get a larger marker so the figure inside it reads at a glance.
   if (u.team === "blue") {
-    svg("rect", { class: "ring", x: -16, y: -13, width: 32, height: 26, rx: 4 }, g);
-    svg("rect", { class: "frame", x: -12, y: -9, width: 24, height: 18, rx: 2 }, g);
+    if (air) {
+      svg("rect", { class: "ring", x: -17, y: -16, width: 34, height: 32, rx: 5 }, g);
+      svg("rect", { class: "frame", x: -14, y: -13, width: 28, height: 26, rx: 3 }, g);
+    } else {
+      svg("rect", { class: "ring", x: -16, y: -13, width: 32, height: 26, rx: 4 }, g);
+      svg("rect", { class: "frame", x: -12, y: -9, width: 24, height: 18, rx: 2 }, g);
+    }
+  } else if (air) {
+    svg("polygon", { class: "ring", points: "0,-22 22,0 0,22 -22,0" }, g);
+    svg("polygon", { class: "frame", points: "0,-17 17,0 0,17 -17,0" }, g);
   } else {
     svg("polygon", { class: "ring", points: "0,-18 19,0 0,18 -19,0" }, g);
     svg("polygon", { class: "frame", points: "0,-13 14,0 0,13 -14,0" }, g);
   }
-  if (ICON[u.type]) {
+  if (air) {
     svg("path", { class: "icon", d: ICON[u.type] }, g);
-    svg("text", { class: "alt", x: u.team === "blue" ? 17 : 15, y: -11 }, g);
+    svg("text", { class: "alt", x: u.team === "blue" ? 20 : 18, y: -14 }, g);
   } else {
     svg("text", { x: 0, y: 0.5 }, g).textContent = ABBR[u.type] ?? "?";
   }
-  svg("rect", { class: "hp-track", x: -11, y: 12.5, width: 22, height: 2.5 }, g);
-  svg("rect", { class: "hp", x: -11, y: 12.5, width: 22, height: 2.5 }, g);
+  const barY = air ? 16 : 12.5;
+  svg("rect", { class: "hp-track", x: -11, y: barY, width: 22, height: 2.5 }, g);
+  svg("rect", { class: "hp", x: -11, y: barY, width: 22, height: 2.5 }, g);
   svg("line", { class: "strike", x1: -12, y1: 10, x2: 12, y2: -10 }, g);
   const pick = () => { if (!dragged) onUnit(g.dataset.id); };
   g.addEventListener("click", pick);
@@ -502,7 +567,7 @@ function dressUnit(el, u, angle) {
   el.querySelector(".hp").setAttribute("width", (Math.max(0, Math.min(100, u.hp)) / 100) * 22);
   const icon = el.querySelector(".icon");
   if (icon) {
-    icon.setAttribute("transform", `rotate(${angle.toFixed(1)}) scale(${u.type === "bomber" ? 0.8 : 0.72})`);
+    icon.setAttribute("transform", `rotate(${angle.toFixed(1)}) scale(1.02)`);
     el.querySelector(".alt").textContent = u.alive ? u.z : "";
   }
   const where = isAir(u) ? `${u.x}, ${u.y}, level ${u.z}` : `${u.x}, ${u.y}`;
@@ -520,6 +585,54 @@ function proj(x, y, z) {
   return [V3.CX + xr * V3.S, V3.CY + yr * V3.S * V3.K - z * V3.ZS, yr];
 }
 const pts = (list) => list.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+
+// One aircraft as a figure in the 3D view: its top-down outline laid on the
+// (tilted) horizontal plane at its altitude, turned to its heading, nose up or
+// down while it climbs or dives, and banked while it orbits.
+function drawCraft(root, u, x, y, gx, gy) {
+  const g = svg("g", { class: `craft ${u.team}${u.id === selectedId ? " selected" : ""}`, role: "button", tabindex: 0 }, root);
+  g.dataset.id = u.id;
+  g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type]} at ${u.x}, ${u.y}, level ${u.z}`);
+  const [hx, hy] = headingOf(u);
+  const len = Math.hypot(hx, hy) || 1;
+  const fx = hx / len, fy = hy / len, rx = -fy, ry = fx;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const k = V3.S * SIZE[u.type] / 20;  // screen units per outline unit, on the ground plane
+  const moved = Math.hypot(u.x - u.px, u.y - u.py);
+  const rise = Math.max(-0.8, Math.min(0.8, (u.z - u.pz) * V3.ZS / (V3.S * Math.max(1, moved))));
+  const roll = u.order.action === "orbit" ? 0.55 : 0;
+  // Screen vectors for one outline unit along the right wing and along the nose.
+  const wing = [k * (rx * c - ry * s), k * V3.K * (rx * s + ry * c)];
+  const nose = [k * (fx * c - fy * s), k * V3.K * (fx * s + fy * c)];
+  const m = (w, n, tx, ty) => `matrix(${w[0].toFixed(3)} ${w[1].toFixed(3)} ${(-n[0]).toFixed(3)} ${(-n[1]).toFixed(3)} ${tx.toFixed(1)} ${ty.toFixed(1)})`;
+  const wr = [wing[0] * Math.cos(roll), wing[1] * Math.cos(roll) + k * Math.sin(roll) * 0.7];
+  const nr = [nose[0], nose[1] - k * rise];
+
+  svg("ellipse", { class: "craft-ring", cx: gx, cy: gy, rx: 15, ry: 7.5 }, g);
+  svg("path", { class: "craft-shadow", d: ICON[u.type], transform: m(wing, nose, gx, gy) }, g);
+  if (u.z > 0) svg("line", { class: "g3-stalk", x1: gx, y1: gy, x2: x, y2: y }, g);
+  if (moved > 0 || u.z !== u.pz) {
+    const [bx, by] = proj(u.px + 0.5, u.py + 0.5, u.pz);
+    if (u.type === "missile") {
+      svg("line", { class: "trail hot tail", x1: bx + (bx - x) * 0.7, y1: by + (by - y) * 0.7, x2: bx, y2: by }, g);
+      svg("line", { class: "trail hot", x1: bx, y1: by, x2: x, y2: y }, g);
+    } else {
+      svg("line", { class: "trail", x1: bx, y1: by, x2: x, y2: y }, g);
+    }
+  }
+  svg("path", { class: "craft-under", d: ICON[u.type], transform: m(wr, nr, x, y + 2.4) }, g);
+  svg("path", { class: "craft-top", d: ICON[u.type], transform: m(wr, nr, x, y) }, g);
+  // One label under the figure: id and altitude level, then a thin health bar.
+  svg("text", { class: "craft-id", x, y: y + 19 }, g).textContent = `${u.id} · L${u.z}`;
+  svg("rect", { class: "hp-track", x: x - 9, y: y + 22.5, width: 18, height: 1.8 }, g);
+  svg("rect", { class: "hp", x: x - 9, y: y + 22.5, width: (Math.max(0, Math.min(100, u.hp)) / 100) * 18, height: 1.8 }, g);
+  svg("circle", { class: "hit", cx: x, cy: y + 3, r: 13 }, g);
+  const pick = () => { if (!dragged) onUnit(u.id); };
+  g.addEventListener("click", pick);
+  g.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+  });
+}
 
 function render3d() {
   const root = $("map3d");
@@ -589,14 +702,13 @@ function render3d() {
     const [gx, gy] = proj(u.x + 0.5, u.y + 0.5, 0);
     let [x, y] = at(u);
     // Units sharing a cell and level are fanned out so each can be tapped.
-    const key = u.x + "," + u.y + "," + u.z;
+    const key = u.x + "," + u.y + "," + (u.alive ? u.z : 0);
     const n = stack.get(key) ?? 0;
     stack.set(key, n + 1);
-    x += n * 12; y -= n * 8;
-    if (u.z > 0 && u.alive) {
-      svg("ellipse", { class: "g3-shadow", cx: gx, cy: gy, rx: 6, ry: 3, "pointer-events": "none" }, root);
-      line("g3-stalk", [gx, gy], [x, y]).setAttribute("pointer-events", "none");
-    }
+    x += n * 22; y -= n * 6;
+    if (u.alive && isAir(u)) { drawCraft(root, u, x, y, gx, gy); continue; }
+    // Ground units, and wrecks where an aircraft went down, keep the flat marker.
+    if (!u.alive) [x, y] = [gx + n * 22, gy - n * 6];
     const el = makeUnit(u);
     el.dataset.id = u.id;
     el.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(0.8)`);
@@ -890,6 +1002,18 @@ function setView(next) {
 }
 $("view2d").onclick = () => setView("2d");
 $("view3d").onclick = () => setView("3d");
+document.addEventListener("keydown", (e) => {
+  const el = document.activeElement;
+  const typing = el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA");
+  const onControl = el && (el.tagName === "BUTTON" || el.getAttribute?.("role") === "button" || el.tagName === "SUMMARY");
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === " " && !onControl) { e.preventDefault(); if (!$("tick1").disabled) $("tick1").click(); }
+  if (view === "3d" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+    e.preventDefault();
+    yaw += (e.key === "ArrowLeft" ? -1 : 1) * Math.PI / 16;
+    render();
+  }
+});
 $("turnLeft").onclick = () => { yaw -= Math.PI / 8; render(); };
 $("turnRight").onclick = () => { yaw += Math.PI / 8; render(); };
 // Drag sideways on the 3D view to turn it. Vertical drags still scroll the page.
