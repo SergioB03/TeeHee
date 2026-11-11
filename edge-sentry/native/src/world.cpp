@@ -450,6 +450,8 @@ Observation World::observe() const {
     c.locked = t.locked;
     c.score = t.threat.learnedScore;
     c.jam = u->type == UnitType::Jammer ? u->jamRadius : 0;
+    // A hit on one of our units is something blue knows about: who was hit, and by which contact.
+    if (tick - u->lastHitTick <= 3) c.hit = u->lastHitId;
     o.contacts.push_back(c);
   }
   return o;
@@ -1116,6 +1118,7 @@ void World::tickOnce() {
       // Aircraft are fragile: a fighter's hit does 50, a missile's 100.
       tgt->hp -= airTarget ? (u.type == UnitType::Missile ? 100 : 50) : profile.damage;
       u.lastHitTick = tick;
+      u.lastHitId = tgt->id;
       events.push_back({tick, "engage", u.id + " hit " + tgt->id});
       if (tgt->hp <= 0) {
         tgt->alive = false;
@@ -1169,7 +1172,7 @@ std::string World::toJson(bool pretty) const {
       << "\"integrity\":" << u.integrity << ","
       << "\"jamRadius\":" << u.jamRadius << ","
       << "\"targetId\":" << jsonString(u.targetId) << ","
-      << "\"lastHitTick\":" << u.lastHitTick << ","
+      << "\"lastHitTick\":" << u.lastHitTick << ",\"lastHitId\":" << jsonString(u.lastHitId) << ","
       << "\"c0\":" << u.c0 << ",\"c1\":" << u.c1 << ",\"c2\":" << u.c2 << ","
       << "\"h0\":" << u.h0 << ",\"h1\":" << u.h1 << ",\"h2\":" << u.h2 << ","
       << "\"r0\":" << u.r0 << ",\"r1\":" << u.r1 << ",\"r2\":" << u.r2 << ",\"r3\":" << u.r3 << ","
@@ -1301,6 +1304,7 @@ World World::fromJson(const std::string& json) {
       extractNumberField(obj, "a2", u.a2);
       extractNumberField(obj, "a3", u.a3);
       extractIntField(obj, "lastHitTick", u.lastHitTick);
+      extractStringField(obj, "lastHitId", u.lastHitId);
       extractNumberField(obj, "c0", u.c0);
       extractNumberField(obj, "c1", u.c1);
       extractNumberField(obj, "c2", u.c2);

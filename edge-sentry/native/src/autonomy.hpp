@@ -32,6 +32,7 @@ struct Contact {
   bool locked = false;  // track is good enough for point defense to shoot at
   double score = 0;     // threat model: chance it harms a blue unit within 5 ticks
   int jam = 0;          // jam field radius if it is an emitter
+  std::string hit;      // one of our units it damaged in the last 3 ticks, if any
 };
 
 struct Observation {
@@ -58,13 +59,23 @@ struct PlannerConfig {
   bool timedDefense = true;  // point defense goes to the contact about to do the most damage
   bool patrol = true;     // with nothing to shoot, wait between the assets and the likeliest attacker
   bool holdFire = true;   // only shoot at contacts labelled watch or hostile; shadow the rest
+  bool selfDefense = true;  // fight a contact that is hunting one of our aircraft: shoot back whatever its
+                            // label, never turn and run from it, and let point defense cover it
+  // What counts as a contact hunting one of our aircraft. 0 (default): it has hit one. 2: also a fighter inside
+  // two cells, at our level, flying straight at us. Tuning showed 2 saves the fighter slightly more often but
+  // shoots more aircraft that were only passing, so a hit is what clears a fighter to shoot back.
+  int huntMode = 0;
+  // An engaged fighter stays on its target unless the score falls well below the watch line. Off by default:
+  // it stops some back-and-forth between shadowing and engaging, at the cost of more bystanders shot.
+  bool commit = false;
   // How much of a covered contact's loss point defense is trusted to stop. Below
   // 1 because a lock can drop, headquarters can be hit, and the model can be
   // wrong; it is what makes a fighter worth sending at a contact that point
   // defense is already covering.
   double coverTrust = 0.75;
 };
-// "full", or one behavior switched off for comparison: "nolead", "notimed", "nopatrol", "freefire".
+// "full", or one behavior switched off for comparison: "nolead", "notimed", "nopatrol", "freefire", "nodefense";
+// or one option switched on: "closein" (a close approach also counts as hunting), "commit".
 bool plannerConfigFromName(const std::string& name, PlannerConfig& out);
 
 std::string observationToJson(const Observation& o);

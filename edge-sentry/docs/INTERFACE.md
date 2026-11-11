@@ -15,10 +15,13 @@ Both messages are a single line of JSON. Source of truth: `native/src/autonomy.h
 | `width`, `height`, `ceiling` | Map size in cells and the highest altitude level |
 | `watchAt` | Threat score at which a contact is labelled "watch" (the engage line) |
 | `own[]` | Blue's live units: `id`, `type`, `x`, `y`, `z`, `hp`, current order `act`, its target `tgt`, and `tx`, `ty`, `tz` |
-| `contacts[]` | Blue's tracks: `id`, class `cls`, position `x`, `y`, `z`, movement over the last tick `vx`, `vy`, `vz`, track quality `snr`, `locked` (1 if point defense can shoot at it), threat `score`, and `jam` radius if it is an emitter |
+| `contacts[]` | Blue's tracks: `id`, class `cls`, position `x`, `y`, `z`, movement over the last tick `vx`, `vy`, `vz`, track quality `snr`, `locked` (1 if point defense can shoot at it), threat `score`, `jam` radius if it is an emitter, and `hit`: the id of a blue unit this contact damaged in the last 3 ticks, or empty |
 
-A contact's orders and target are never in the message. A regression test
-checks that no blue unit id appears anywhere in `contacts`.
+A contact's orders and target are never in the message. The one thing it
+says about intent is `hit`, which blue can observe for itself: a unit knows
+what just damaged it. Regression tests check that no blue unit id appears in
+`contacts` before anything has been hit, and that `hit` names the right unit
+afterwards.
 
 ## Plan (from the autonomy)
 
@@ -38,5 +41,6 @@ A unit that should carry on as it is gets no order.
 2. **A late plan is a dead plan.** The receiver discards a reply that arrives after the tick budget, and never applies a plan to a later tick.
 3. **No reply means no change.** Units keep the orders they have.
 4. **Only blue.** The planner orders blue units only; the simulator refuses anything else.
-5. **Hold fire.** A fighter may be sent to shoot only at a contact whose score is at or above `watchAt`. Below it, the fighter may follow (`SHADOW`) but not engage.
+5. **Hold fire.** A fighter may be sent to shoot only at a contact whose score is at or above `watchAt`. Below it, the fighter may follow (`SHADOW`) but not engage. The one exception is self-defense: a contact whose `hit` names one of blue's aircraft may be engaged whatever its score, and a damaged fighter fights that contact instead of returning to base.
 6. **Transport.** Newline-delimited JSON over TCP, or stdin and stdout. One reply per message, in order. `{"ping":1}` is answered with `{"pong":1}`.
+7. **ROS 2.** The same two messages are available as typed ROS 2 topics (`edge_sentry/observation`, `edge_sentry/plan`) with the same fields and the same rules; see [`ros2/`](../ros2/README.md).

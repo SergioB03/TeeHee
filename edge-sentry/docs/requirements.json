@@ -1,0 +1,591 @@
+[
+  {
+    "id": "SIM-01",
+    "area": "Simulator",
+    "text": "Every unit has an altitude level from 0 to 5. Ground units stay at 0; aircraft start at their type's cruise level.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "aircraft start at cruise altitude and ground units at 0"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "ground units cannot change altitude"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "ground unit cannot spawn in the air"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-02",
+    "area": "Simulator",
+    "text": "No aircraft may be placed or ordered above its type's ceiling.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "drone cannot spawn above its ceiling"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "altitude above the ceiling is rejected"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-03",
+    "area": "Simulator",
+    "text": "An attacker must be at or below its release altitude to hit a ground target.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "an attacker descends to its release altitude"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "no hits land from above release altitude, hits land once it is down"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-04",
+    "area": "Simulator",
+    "text": "Only fighters and missiles may attack aircraft, and must be within one level of the target.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "bombers cannot attack aircraft"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "a fighter climbs or dives to its target's level and shoots it down in two hits"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-05",
+    "area": "Simulator",
+    "text": "A contact at level 0 or 1 behind cover gives a weaker track; a low-signature aircraft gives a weaker track than a large one.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "a low contact behind cover is masked: weaker track and no lock; one level up it is seen"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "a stealth fighter gives a much weaker track than a bomber at the same place"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-06",
+    "area": "Simulator",
+    "text": "Point defense stops a covered contact's hit, and suppresses a covered jammer, only when it has a lock on that contact.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "a defended missile is blocked and HQ takes no damage"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "a defended jammer's field is suppressed"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "defending a contact with no lock does not block it"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-07",
+    "area": "Simulator",
+    "text": "An invalid command is refused with a reason and leaves the world unchanged.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "rejected commands leave the world unchanged"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "move off the map is rejected"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "launch at self is rejected"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-08",
+    "area": "Simulator",
+    "text": "The world is the same whether time advances in one call or many, and survives being saved and reloaded, including worlds saved by older versions.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "observed velocity persists across CLI calls"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "sequence score is the same for 4 ticks at once and 4 single ticks with reads in between"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "a world saved before altitude existed loads with aircraft at cruise level"
+      ]
+    ]
+  },
+  {
+    "id": "SIM-09",
+    "area": "Simulator",
+    "text": "A cease or move order ends a standing attack.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "cease clears the jet's target"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "a move order replaces a standing attack"
+      ]
+    ]
+  },
+  {
+    "id": "LOG-01",
+    "area": "Decision log",
+    "text": "Every order, spawn and reset is logged with who issued it, why, and the threat picture at that moment, whether accepted or refused.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "reset, accepted and refused orders are all logged; ticks are not"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "log entry records actor, reason, order and outcome"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "log entry carries the threat picture the decision was made on"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "refused orders are logged with the simulator's reason"
+      ]
+    ]
+  },
+  {
+    "id": "LOG-02",
+    "area": "Decision log",
+    "text": "No value supplied in a command can switch logging off or corrupt the log.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "a reason that looks like a flag is kept as text and cannot switch logging off"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "the log stays valid JSON with quotes and newlines in a reason"
+      ]
+    ]
+  },
+  {
+    "id": "LOG-03",
+    "area": "Decision log",
+    "text": "Orders given by the computer are logged under their own actor name with a reason.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "each opponent order is logged with actor 'opponent' and a reason"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "autopilot orders are logged as actor 'autopilot' with the behavior and a reason"
+      ]
+    ]
+  },
+  {
+    "id": "MDL-01",
+    "area": "Threat model",
+    "text": "The threat model reads only inputs blue can observe, and the simulator publishes the list so training code cannot drift from it.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "`inputs` lists the model's input names, history included"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "learned: observed vector matches the input list, all values in 0..1"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "the model sees altitude and descent"
+      ]
+    ]
+  },
+  {
+    "id": "MDL-02",
+    "area": "Threat model",
+    "text": "The C++ models give the same scores as their Python references on every held-out row.",
+    "tests": [
+      [
+        "ml/evaluate.py",
+        "C++/Python parity under 1e-4"
+      ],
+      [
+        "ml/evaluate.py",
+        "sequence model C++/Python parity under 1e-4"
+      ]
+    ]
+  },
+  {
+    "id": "MDL-03",
+    "area": "Threat model",
+    "text": "Held-out accuracy and scripted-scenario results do not fall below their floors.",
+    "tests": [
+      [
+        "ml/evaluate.py",
+        "learned AUC at least 0.95"
+      ],
+      [
+        "ml/evaluate.py",
+        "learned AUC on air contacts at least 0.93"
+      ],
+      [
+        "ml/evaluate.py",
+        "learned passes at least 12 scripted scenarios"
+      ]
+    ]
+  },
+  {
+    "id": "MDL-04",
+    "area": "Threat model",
+    "text": "Acting on the model's scores gives better outcomes than acting on the heuristics or at random.",
+    "tests": [
+      [
+        "ml/outcome.py",
+        "learned triage beats random assignment"
+      ],
+      [
+        "ml/outcome.py",
+        "learned triage beats the heuristic that reads the target"
+      ]
+    ]
+  },
+  {
+    "id": "SNS-01",
+    "area": "Sensing",
+    "text": "With noise off, every contact is tracked exactly where it is, so earlier results are unchanged.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "sensing is perfect by default: every contact tracked exactly where it is"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "noise 0 restores the perfect picture"
+      ],
+      [
+        "ml/tracking_eval.py",
+        "perfect picture tracks every contact with no error"
+      ]
+    ]
+  },
+  {
+    "id": "SNS-02",
+    "area": "Sensing",
+    "text": "A noisy run replays exactly from its seed.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "noisy sensing is reproducible: the same seed gives the same picture every tick"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "a different seed gives a different picture"
+      ]
+    ]
+  },
+  {
+    "id": "SNS-03",
+    "area": "Sensing",
+    "text": "The tracker keeps more contacts, loses fewer tracks and is closer to the truth than the best single detection.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "the tracker holds more contact-ticks and loses fewer tracks than the best single detection"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "the tracker's positions are closer to the truth than raw detections"
+      ],
+      [
+        "ml/tracking_eval.py",
+        "under heavy noise the tracker loses fewer tracks"
+      ]
+    ]
+  },
+  {
+    "id": "SNS-04",
+    "area": "Sensing",
+    "text": "A contact with no track is invisible to the threat model and the planner.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "the planner's observation lists only contacts that have a track"
+      ]
+    ]
+  },
+  {
+    "id": "IF-01",
+    "area": "Autonomy interface",
+    "text": "The observation holds only what blue can measure. It never names a contact's target; it names a blue unit only once that unit has been hit.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "an observed contact carries only what blue can measure"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "the observation never names what a contact is attacking (nothing has been hit yet)"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "once a contact hits a blue unit, the observation says which unit it hit"
+      ]
+    ]
+  },
+  {
+    "id": "IF-02",
+    "area": "Autonomy interface",
+    "text": "A malformed message or an unknown message version is refused with an error, never a crash.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "a malformed message gets an error reply, not a crash"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "an unknown message version is refused"
+      ]
+    ]
+  },
+  {
+    "id": "IF-03",
+    "area": "Autonomy interface",
+    "text": "The node answers one plan per observation, in order, and accepts a new client after one disconnects.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "a TCP connection carries one plan per observation, in order"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "after a client disconnects the node accepts the next one"
+      ]
+    ]
+  },
+  {
+    "id": "IF-04",
+    "area": "Autonomy interface",
+    "text": "The edge node decides exactly as the planner inside the simulator does.",
+    "tests": [
+      [
+        "sil/run_sil.py",
+        "the node agrees with the in-simulator planner on every tick"
+      ],
+      [
+        "sil/run_sil.py",
+        "same mission value with the node in the loop"
+      ]
+    ]
+  },
+  {
+    "id": "IF-05",
+    "area": "Autonomy interface",
+    "text": "A reply that misses the tick budget is not used, and a dead link behaves exactly like no autonomy.",
+    "tests": [
+      [
+        "sil/run_sil.py",
+        "no reply misses the tick budget on a direct link"
+      ],
+      [
+        "sil/run_sil.py",
+        "with the link down, nothing from the node is used"
+      ]
+    ]
+  },
+  {
+    "id": "IF-06",
+    "area": "Autonomy interface",
+    "text": "The same interface is available as ROS 2 topics with typed messages: the simulator and the planner run as separate ROS 2 nodes, and the plan on the topic is exactly what the planner gives for that observation.",
+    "tests": [
+      [
+        "ros2/check_bridge.py",
+        "an observation was published on the topic for every tick"
+      ],
+      [
+        "ros2/check_bridge.py",
+        "a plan came back over the topic for every tick that was played"
+      ],
+      [
+        "ros2/check_bridge.py",
+        "each plan matches the planner run directly on the same observation"
+      ],
+      [
+        "ros2/check_bridge.py",
+        "the orders took effect: headquarters is defending in a later observation"
+      ]
+    ]
+  },
+  {
+    "id": "AUT-01",
+    "area": "Autonomy",
+    "text": "Point defense covers the contact that can do the most damage next, not the one with the highest score regardless of timing, and never one it cannot lock.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "point defense covers the jet attacking now, not a missile still 8 ticks out"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "point defense switches to the missile once it can hit next tick"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a contact with no lock is passed over for one that can be shot at"
+      ]
+    ]
+  },
+  {
+    "id": "AUT-02",
+    "area": "Autonomy",
+    "text": "The planner gives no order to a unit that is already doing the right thing.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "no order is repeated when point defense is already on the right contact"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "already engaging the chosen target, it gets no new order"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "on station and orbiting, it gets no new order"
+      ]
+    ]
+  },
+  {
+    "id": "AUT-03",
+    "area": "Autonomy",
+    "text": "The planner orders only blue units, and a fighter is never sent against a ground unit.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "autopilot only orders blue units"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "the fighter never goes after a ground unit"
+      ]
+    ]
+  },
+  {
+    "id": "AUT-04",
+    "area": "Autonomy",
+    "text": "The planner defends better than point defense alone and than either simpler fighter rule.",
+    "tests": [
+      [
+        "ml/autonomy_eval.py",
+        "planner beats point defense alone"
+      ],
+      [
+        "ml/autonomy_eval.py",
+        "planner beats the chase-nearest fighter"
+      ],
+      [
+        "ml/autonomy_eval.py",
+        "planner beats the scripted fighter"
+      ]
+    ]
+  },
+  {
+    "id": "ROE-01",
+    "area": "Rules of engagement",
+    "text": "Hold fire: a fighter does not shoot at a contact the threat model has not labelled watch or hostile; it may follow it.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "hold fire: a contact below the watch line is shadowed, not shot at"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a fighter that is merely close and has not fired is not shot at"
+      ]
+    ]
+  },
+  {
+    "id": "ROE-02",
+    "area": "Rules of engagement",
+    "text": "Self-defense: a contact that has hit one of blue's aircraft may be shot at whatever its label, and a damaged fighter fights its hunter instead of running.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "self-defense: a contact that has hit our fighter is shot at even below the watch line"
+      ],
+      [
+        "native/tests/test_planner.py",
+        "a damaged fighter does not turn and run from the contact hunting it: it fights"
+      ],
+      [
+        "ml/opponent_eval.py",
+        "self-defense keeps the fighter alive more often"
+      ]
+    ]
+  },
+  {
+    "id": "ROE-03",
+    "area": "Rules of engagement",
+    "text": "A damaged fighter that is not being hunted breaks off and returns to headquarters.",
+    "tests": [
+      [
+        "native/tests/test_planner.py",
+        "a damaged fighter breaks off and returns to headquarters"
+      ]
+    ]
+  },
+  {
+    "id": "RED-01",
+    "area": "Red opponent",
+    "text": "Red orders only red units, and its coordinated strike arrives together and low.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "red opponent never orders blue units"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "under the coordinated doctrine at least three attackers land their first hit within three ticks of each other"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "jets and drones come in at level 1"
+      ]
+    ]
+  },
+  {
+    "id": "RED-02",
+    "area": "Red opponent",
+    "text": "The coordinated doctrine is harder on a defended blue than the original script, and the planner still beats no defense against it.",
+    "tests": [
+      [
+        "ml/opponent_eval.py",
+        "the coordinated doctrine hurts a defended blue more than the original script"
+      ],
+      [
+        "ml/opponent_eval.py",
+        "the planner still beats no defense against the coordinated doctrine"
+      ]
+    ]
+  }
+]

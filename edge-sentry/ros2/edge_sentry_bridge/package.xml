@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>edge_sentry_bridge</name>
+  <version>0.1.0</version>
+  <description>Runs the edge-sentry simulator and its autonomy planner as two ROS 2 nodes that talk over topics.</description>
+  <maintainer email="noreply@example.com">edge-sentry</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>edge_sentry_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

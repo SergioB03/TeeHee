@@ -9,6 +9,10 @@ Both sides flown by the computer over 80 random battles of 22 ticks: blue has he
 | Original script | nobody | 0.622 | 18.57 | 2.79 | 0.00 | 100% |
 | Original script | the planner | 0.843 | 7.14 | 0.33 | 3.01 | 100% |
 | Coordinated doctrine | nobody | 0.636 | 16.29 | 2.05 | 0.00 | 54% |
-| Coordinated doctrine | the planner | 0.766 | 9.65 | 0.81 | 1.55 | 56% |
+| Coordinated doctrine | the planner without self-defense | 0.766 | 9.65 | 0.81 | 1.55 | 56% |
+| Coordinated doctrine | the planner | 0.815 | 7.83 | 0.31 | 1.90 | 91% |
+| Coordinated doctrine | the planner, a close approach also counts as hostile | 0.823 | 7.50 | 0.24 | 2.04 | 94% |
 
 The original script launched everything at once at the nearest target. The coordinated doctrine times the strike to arrive together, brings jets, drones and the stealth fighter in at level 1, sends the jammer to headquarters first, sends the stealth fighter after blue's fighter, and spreads the other attackers across different assets. It is built to beat a defense: against a blue that does nothing, holding to arrive together costs ticks and the two do about the same.
+
+Self-defense is what the planner was taught after first losing its fighter in almost half of these battles: a contact that has hit one of blue's aircraft may be shot at whatever its threat label, a damaged fighter fights the contact hunting it instead of turning for home (a hunter as fast as it is cannot be outrun), and point defense may cover the hunter. The last row also treats a fighter closing to two cells at blue's level as hostile before it fires; `ml/AUTONOMY.md` shows what that costs in aircraft shot down that never attacked.

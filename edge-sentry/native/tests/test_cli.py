@@ -396,8 +396,8 @@ code, out = sim("observe")
 obs = out["observation"]
 check("observe lists blue's own units and its contacts", code == 0 and obs["v"] == 1 and len(obs["own"]) == 5 and len(obs["contacts"]) == 7)
 check("an observed contact carries only what blue can measure",
-      all(set(c) == {"id", "cls", "x", "y", "z", "vx", "vy", "vz", "snr", "locked", "score", "jam"} for c in obs["contacts"]))
-check("the observation never names what a contact is attacking",
+      all(set(c) == {"id", "cls", "x", "y", "z", "vx", "vy", "vz", "snr", "locked", "score", "jam", "hit"} for c in obs["contacts"]))
+check("the observation never names what a contact is attacking (nothing has been hit yet)",
       not any(blue_id in json.dumps(obs["contacts"]) for blue_id in ("B-HQ", "B-S1", "B-S2", "B-R1", "B-F1")))
 before = len(decisions(500))
 code, out = sim("autopilot", "--dry-run")
@@ -492,6 +492,17 @@ check("under the coordinated doctrine at least three attackers land their first 
 check("jets and drones come in at level 1", levels.get("R-JET1") == 1 and levels.get("R-DRN1") == 1)
 check("every red attacker ends up attacking: nobody is left holding",
       all(u["targetId"] for u in world["units"] if u["team"] == "red" and u["alive"] and u["type"] not in ("jammer",)))
+sim("reset")
+
+# --- self-defense: a hit on blue's fighter is reported in the observation ------------
+custom_world([("B-HQ", "hq", "blue", 0, 0, 0), ("B-F1", "stealth", "blue", 6, 6, 4), ("R-F1", "stealth", "red", 7, 6, 4)])
+sim("order", "--id", "R-F1", "--action", "launch", "--target", "B-F1", "--no-log")
+named = []
+for _ in range(8):
+    sim("tick")
+    obs = sim("observe")[1]["observation"]
+    named += [c["hit"] for c in obs["contacts"] if c["id"] == "R-F1"]
+check("once a contact hits a blue unit, the observation says which unit it hit", "B-F1" in named and named[0] == "")
 sim("reset")
 
 print()

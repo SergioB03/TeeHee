@@ -12,8 +12,8 @@ The simulator ran here and the autonomy ran in a separate `edge-node` process: a
 | Ticks where the node's orders differed from the planner inside the simulator | 0 |
 | Mission value, node in the loop | 0.9700 |
 | Mission value, planner inside the simulator | 0.9700 |
-| Planning time in the node: median, 99th percentile, worst | 38 µs, 98 µs, 121 µs |
-| Round trip over TCP: median, 99th percentile, worst | 0.26 ms, 0.44 ms, 0.59 ms |
+| Planning time in the node: median, 99th percentile, worst | 39 µs, 94 µs, 222 µs |
+| Round trip over TCP: median, 99th percentile, worst | 0.27 ms, 0.53 ms, 2.78 ms |
 | Replies that missed the 50 ms budget | 0 |
 
 ## When the link gets worse
@@ -22,7 +22,7 @@ The simulator ran here and the autonomy ran in a separate `edge-node` process: a
 | --- | --- | --- | --- | --- |
 | Direct link | 0.970 | 100% | 0 | 0 |
 | 10 ms delay | 0.970 | 100% | 0 | 0 |
-| 40 ms delay, 20 ms jitter | 0.968 | 73% | 238 | 0 |
+| 40 ms delay, 20 ms jitter | 0.968 | 73% | 239 | 0 |
 | 10% of messages lost | 0.967 | 91% | 0 | 81 |
 | 30% of messages lost | 0.964 | 72% | 0 | 247 |
 | 60% of messages lost | 0.950 | 41% | 0 | 520 |
