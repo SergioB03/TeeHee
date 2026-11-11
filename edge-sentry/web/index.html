@@ -226,7 +226,28 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 .craft .hp-track { fill: var(--line); }
 .craft.blue .hp { fill: var(--blue); }
 .craft.red .hp { fill: var(--red); }
-.craft .hit { fill: transparent; }
+.craft .hit, .gunit .hit { fill: transparent; }
+.gunit { cursor: pointer; }
+.gunit .face { stroke-width: 0.9; stroke-linejoin: round; }
+.gunit.blue .face { fill: var(--blue-wash); stroke: var(--blue); }
+.gunit.red .face { fill: var(--red-wash); stroke: var(--red); }
+.gunit .face.top { fill: var(--paper-raised); }
+.gunit .mast, .gunit .wave, .gunit .brace { fill: none; stroke-width: 1.2; stroke-linecap: round; }
+.gunit.blue .mast, .gunit.blue .wave, .gunit.blue .brace { stroke: var(--blue); }
+.gunit.red .mast, .gunit.red .wave, .gunit.red .brace { stroke: var(--red); }
+.gunit .wave { stroke: var(--amber) !important; }
+.gunit .dish, .gunit .flag, .gunit .tip { stroke: var(--ink); stroke-width: 0.6; }
+.gunit.blue .dish, .gunit.blue .flag, .gunit.blue .tip { fill: var(--blue); }
+.gunit.red .dish, .gunit.red .flag, .gunit.red .tip { fill: var(--red); }
+.gunit .craft-ring { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0; }
+.gunit.selected .craft-ring { opacity: 1; }
+.gunit.selected .face { stroke-width: 1.8; }
+.placing .gunit { pointer-events: none; }
+.labels text { font-family: var(--label); font-size: 7px; font-weight: 600; fill: var(--ink); text-anchor: middle; paint-order: stroke; stroke: var(--paper); stroke-width: 2.5px; }
+.labels .leader { stroke: var(--ink-soft); stroke-width: 0.5; }
+.labels .hp-track { fill: var(--line); }
+.labels .hp.blue { fill: var(--blue); }
+.labels .hp.red { fill: var(--red); }
 .placing .craft { pointer-events: none; }
 .keys { display: none; }
 
@@ -364,7 +385,7 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     </div>
   </details>
 
-  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows aircraft as figures at their altitude, each with a shadow on the ground below it, nose up or down as it climbs or dives, banked while it orbits, and a missile leaves a bright trail; drag sideways to turn the view. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
+  <p class="key">Rectangles are blue units and diamonds are red. HQ headquarters, SN sensor, RL relay, JM jammer. Aircraft and missiles are drawn as silhouettes pointing the way they are flying, with their altitude level (0 ground to 5) beside them: jet, stealth fighter (F-22 class: fast and hard to see), bomber (slow, heavy, strikes from high up), drone (slow and low) and missile. Attackers must come down to hit a ground target, anything at level 0 or 1 hides behind cover, and point defense needs a lock on a contact to stop it. The 3D view shows aircraft as figures at their altitude, each with a shadow on the ground below it, nose up or down as it climbs or dives, banked while it orbits, and a missile leaves a bright trail; drag sideways to turn the view. Ground units there are small models: a block with a flag is headquarters, a mast with a dish is a sensor, a lattice tower is a relay, and a block with radio waves is a jammer. The shaded circle is a jammer's field, hatched squares are cover, a dotted line is a move order, a red line is an attack, and a dashed blue line is the HQ's point defense covering against a contact (its hit is blocked, or its jam field suppressed). Threat is the trained model's estimate of the chance a contact harms a blue unit within 5 ticks, judged only from how it moves and what it emits. The two marks on each bar are the watch and hostile cut-offs.</p>
   </div>
 </div>
 
@@ -589,7 +610,7 @@ const pts = (list) => list.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).j
 // One aircraft as a figure in the 3D view: its top-down outline laid on the
 // (tilted) horizontal plane at its altitude, turned to its heading, nose up or
 // down while it climbs or dives, and banked while it orbits.
-function drawCraft(root, u, x, y, gx, gy) {
+function drawCraft(root, u, x, y, gx, gy, labels) {
   const g = svg("g", { class: `craft ${u.team}${u.id === selectedId ? " selected" : ""}`, role: "button", tabindex: 0 }, root);
   g.dataset.id = u.id;
   g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type]} at ${u.x}, ${u.y}, level ${u.z}`);
@@ -622,16 +643,100 @@ function drawCraft(root, u, x, y, gx, gy) {
   }
   svg("path", { class: "craft-under", d: ICON[u.type], transform: m(wr, nr, x, y + 2.4) }, g);
   svg("path", { class: "craft-top", d: ICON[u.type], transform: m(wr, nr, x, y) }, g);
-  // One label under the figure: id and altitude level, then a thin health bar.
-  svg("text", { class: "craft-id", x, y: y + 19 }, g).textContent = `${u.id} · L${u.z}`;
-  svg("rect", { class: "hp-track", x: x - 9, y: y + 22.5, width: 18, height: 1.8 }, g);
-  svg("rect", { class: "hp", x: x - 9, y: y + 22.5, width: (Math.max(0, Math.min(100, u.hp)) / 100) * 18, height: 1.8 }, g);
+  labels.push({ x, y: y + 19, ax: x, ay: y + 8, text: `${u.id} · L${u.z}`, hp: u.hp, team: u.team });
   svg("circle", { class: "hit", cx: x, cy: y + 3, r: 13 }, g);
   const pick = () => { if (!dragged) onUnit(u.id); };
   g.addEventListener("click", pick);
   g.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
   });
+}
+
+// A ground unit as a small model standing on its cell: headquarters is a block
+// with a flag, a sensor a mast with a dish, a relay a lattice tower, a jammer a
+// block with radio waves.
+function drawGround(root, u, n, labels) {
+  const g = svg("g", { class: `gunit ${u.team}${u.id === selectedId ? " selected" : ""}`, role: "button", tabindex: 0 }, root);
+  if (n) g.setAttribute("transform", `translate(${n * 22} ${-n * 6})`);
+  g.dataset.id = u.id;
+  g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}`);
+  const P = (dx, dy, z) => proj(u.x + dx, u.y + dy, z);
+  const [bx, by] = P(0.5, 0.5, 0);
+  svg("ellipse", { class: "craft-ring", cx: bx, cy: by, rx: 15, ry: 7.5 }, g);
+  const box = (a, b, z0, z1) => {
+    const c = [[a, a], [b, a], [b, b], [a, b]];
+    const sides = c.map((p, i) => {
+      const q = c[(i + 1) % 4];
+      return { depth: P(p[0], p[1], 0)[2] + P(q[0], q[1], 0)[2], face: [P(p[0], p[1], z0), P(q[0], q[1], z0), P(q[0], q[1], z1), P(p[0], p[1], z1)] };
+    });
+    sides.sort((s1, s2) => s1.depth - s2.depth);  // far sides first, so near ones cover them
+    for (const side of sides) svg("polygon", { class: "face", points: pts(side.face) }, g);
+    svg("polygon", { class: "face top", points: pts(c.map((p) => P(p[0], p[1], z1))) }, g);
+  };
+  const mast = (z0, z1) => {
+    const a = P(0.5, 0.5, z0), b = P(0.5, 0.5, z1);
+    svg("line", { class: "mast", x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, g);
+    return b;
+  };
+  let top;
+  if (u.type === "hq") {
+    box(0.18, 0.82, 0, 0.75);
+    top = mast(0.75, 1.4);
+    svg("polygon", { class: "flag", points: pts([top, [top[0] + 8, top[1] + 2.5], [top[0], top[1] + 5]]) }, g);
+  } else if (u.type === "sensor") {
+    box(0.36, 0.64, 0, 0.25);
+    top = mast(0.25, 1.0);
+    svg("ellipse", { class: "dish", cx: top[0], cy: top[1], rx: 6.5, ry: 3, transform: `rotate(-25 ${top[0].toFixed(1)} ${top[1].toFixed(1)})` }, g);
+  } else if (u.type === "relay") {
+    top = P(0.5, 0.5, 1.35);
+    for (const [dx, dy] of [[0.28, 0.28], [0.72, 0.28], [0.72, 0.72], [0.28, 0.72]]) {
+      const foot = P(dx, dy, 0);
+      svg("line", { class: "mast", x1: foot[0], y1: foot[1], x2: top[0], y2: top[1] }, g);
+    }
+    svg("polygon", { class: "brace", points: pts([[0.39, 0.39], [0.61, 0.39], [0.61, 0.61], [0.39, 0.61]].map(([dx, dy]) => P(dx, dy, 0.675))) }, g);
+    svg("circle", { class: "tip", cx: top[0], cy: top[1], r: 2 }, g);
+  } else {
+    box(0.24, 0.76, 0, 0.4);
+    top = mast(0.4, 0.95);
+    const [tx, ty] = top;
+    for (const r of [4, 7.5]) {
+      svg("path", { class: "wave", d: `M${(tx - r).toFixed(1)},${(ty - r * 0.6).toFixed(1)} A${r},${r} 0 0 0 ${(tx - r).toFixed(1)},${(ty + r * 0.6).toFixed(1)} M${(tx + r).toFixed(1)},${(ty - r * 0.6).toFixed(1)} A${r},${r} 0 0 1 ${(tx + r).toFixed(1)},${(ty + r * 0.6).toFixed(1)}` }, g);
+    }
+  }
+  svg("circle", { class: "hit", cx: bx, cy: (by + top[1]) / 2, r: 13 }, g);
+  labels.push({ x: bx + n * 22, y: by + 12 - n * 6, ax: bx + n * 22, ay: by + 3 - n * 6, text: u.id, hp: u.hp, team: u.team });
+  const pick = () => { if (!dragged) onUnit(u.id); };
+  g.addEventListener("click", pick);
+  g.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); }
+  });
+}
+
+// Name labels are placed last, each nudged down or sideways until it is clear
+// of the ones already placed, with a thin leader line back to its unit.
+function placeLabels(root, labels) {
+  const layer = svg("g", { class: "labels", "pointer-events": "none" }, root);
+  const placed = [];
+  labels.sort((a, b) => a.y - b.y);
+  for (const label of labels) {
+    const w = label.text.length * 3.7 + 6, h = 12;
+    const fit = (x, y) => [Math.max(w / 2, Math.min(V3.W - w / 2, x)), Math.min(V3.H - 6, y)];
+    const clear = ([x, y]) => !placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < h);
+    const offsets = [[0, 0], [0, 12], [w * 0.7, 6], [-w * 0.7, 6], [0, 24], [w * 0.7, 18], [-w * 0.7, 18], [w, 0], [-w, 0], [0, 36]];
+    let spot = fit(label.x, label.y);
+    for (const [dx, dy] of offsets) {
+      const candidate = fit(label.x + dx, label.y + dy);
+      if (clear(candidate)) { spot = candidate; break; }
+    }
+    const [x, y] = spot;
+    placed.push({ x, y, w });
+    if (Math.abs(x - label.x) > 1 || Math.abs(y - label.y) > 1) {
+      svg("line", { class: "leader", x1: label.ax, y1: label.ay, x2: x, y2: y - 6 }, layer);
+    }
+    svg("text", { class: "craft-id", x, y }, layer).textContent = label.text;
+    svg("rect", { class: "hp-track", x: x - 9, y: y + 3, width: 18, height: 1.8 }, layer);
+    svg("rect", { class: "hp " + label.team, x: x - 9, y: y + 3, width: (Math.max(0, Math.min(100, label.hp)) / 100) * 18, height: 1.8 }, layer);
+  }
 }
 
 function render3d() {
@@ -698,6 +803,7 @@ function render3d() {
   // Far units first so nearer ones draw over them.
   const order = [...world.units].sort((a, b) => Number(a.alive) - Number(b.alive) || at(a)[2] - at(b)[2]);
   const stack = new Map();
+  const labels = [];
   for (const u of order) {
     const [gx, gy] = proj(u.x + 0.5, u.y + 0.5, 0);
     let [x, y] = at(u);
@@ -706,17 +812,19 @@ function render3d() {
     const n = stack.get(key) ?? 0;
     stack.set(key, n + 1);
     x += n * 22; y -= n * 6;
-    if (u.alive && isAir(u)) { drawCraft(root, u, x, y, gx, gy); continue; }
-    // Ground units, and wrecks where an aircraft went down, keep the flat marker.
-    if (!u.alive) [x, y] = [gx + n * 22, gy - n * 6];
+    if (u.alive && isAir(u)) { drawCraft(root, u, x, y, gx, gy, labels); continue; }
+    if (u.alive) { drawGround(root, u, n, labels); continue; }
+    // Destroyed units stay as a small faded marker on the ground where they fell.
+    [x, y] = [gx + n * 22, gy - n * 6];
     const el = makeUnit(u);
     el.dataset.id = u.id;
-    el.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(0.8)`);
+    el.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(0.6)`);
     const [hx, hy] = headingOf(u);
     const c = Math.cos(yaw), s = Math.sin(yaw);
     dressUnit(el, u, Math.atan2(hx * c - hy * s, -(hx * s + hy * c) * V3.K) * 180 / Math.PI);
     root.appendChild(el);
   }
+  placeLabels(root, labels);
 }
 
 function renderMap() {
