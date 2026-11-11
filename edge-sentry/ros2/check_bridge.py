@@ -19,7 +19,7 @@ import time
 import rclpy
 from rclpy.node import Node
 
-from edge_sentry_bridge.wire import observation_to_wire, order_key
+from edge_sentry_bridge.wire import KEPT, observation_to_wire, order_key
 from edge_sentry_msgs.msg import Observation, Plan
 
 p = argparse.ArgumentParser()
@@ -34,8 +34,9 @@ world = f"/tmp/edge-sentry-ros2-{os.getpid()}/world.json"
 rclpy.init()
 probe = Node("edge_sentry_probe")
 observations, plans = {}, {}
-probe.create_subscription(Observation, "edge_sentry/observation", lambda m: observations.setdefault(m.tick, m), 50)
-probe.create_subscription(Plan, "edge_sentry/plan", lambda m: plans.setdefault(m.tick, m), 50)
+# Ask for the kept messages too: this monitor must not miss a tick because it was matched a moment late.
+probe.create_subscription(Observation, "edge_sentry/observation", lambda m: observations.setdefault(m.tick, m), KEPT)
+probe.create_subscription(Plan, "edge_sentry/plan", lambda m: plans.setdefault(m.tick, m), KEPT)
 
 procs = [
     subprocess.Popen(["ros2", "run", "edge_sentry_bridge", "autonomy_node", "--ros-args", "-p", f"node:={args.node}"]),

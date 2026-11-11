@@ -15,7 +15,7 @@ from rclpy.node import Node
 
 from edge_sentry_msgs.msg import Observation, Plan
 
-from .wire import observation_from_wire
+from .wire import KEPT, observation_from_wire
 
 
 class SimNode(Node):
@@ -30,7 +30,7 @@ class SimNode(Node):
         self.listeners = int(self.declare_parameter("listeners", 1).value)  # subscribers to wait for before tick 0
         os.makedirs(os.path.dirname(self.world), exist_ok=True)
 
-        self.publisher = self.create_publisher(Observation, "edge_sentry/observation", 10)
+        self.publisher = self.create_publisher(Observation, "edge_sentry/observation", KEPT)
         self.create_subscription(Plan, "edge_sentry/plan", self.on_plan, 10)
         self.pending = None   # the plan for the current tick, if one has arrived
         self.tick = -1        # tick of the observation last published

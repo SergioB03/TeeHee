@@ -3,7 +3,14 @@
 The planner speaks one-line JSON; ROS 2 speaks typed messages. Nothing is
 added or dropped on the way through, so the planner decides the same either way.
 """
+from rclpy.qos import DurabilityPolicy, QoSProfile
+
 from edge_sentry_msgs.msg import Contact, Observation, Order, OwnUnit, Plan
+
+# Both publishers keep their recent messages for anyone who asks for them, so a monitor that
+# joins a moment late (or mid-run) still sees every tick. The two nodes themselves subscribe
+# the ordinary way and only ever act on what is current.
+KEPT = QoSProfile(depth=64, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
 
 def observation_from_wire(data, stamp):
