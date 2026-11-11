@@ -132,6 +132,9 @@ struct World {
   // Which scorer fills threatScore/threatLabel. Process-wide so it applies to
   // worlds scored while loading; set from `--scorer` before any world exists.
   static ScorerKind activeScorer;
+  // How the red computer opponent plays: true = the coordinated doctrine
+  // (default), false = the original one-line script, kept for comparison.
+  static bool redCoordinated;
 
   static World defaultScenario();
   // A larger, order-free setup for play mode: nobody has a target yet.

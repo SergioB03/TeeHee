@@ -58,6 +58,16 @@ The last column matters because the simulator does not punish shooting an aircra
 
 A reply that misses the 50 ms tick budget is thrown away and units keep their last orders, so a bad link degrades gradually and a dead one is exactly as good as no autonomy (0.878), never worse. Those timings are from the development machine. CI also cross-compiles the node for arm64 and runs the same tests under emulation, which shows the build is right for a Raspberry Pi or Jetson but says nothing about their speed; it has not been timed on a physical device yet.
 
+**A red side that fights back.** Red's computer opponent used to launch everything at once at the nearest target, and in the free sandbox red did nothing at all unless ordered. It now flies a coordinated doctrine: faster attackers hold so the strike arrives together (one point defense can stop only one hit per tick), jets, drones and the stealth fighter come in at level 1 where cover hides them, the jammer drives to headquarters first, and the stealth fighter goes after blue's fighter. Both sides flown by the computer over 80 random battles:
+
+| Red flown by | Blue flown by | Blue mission value | Blue's fighter survives |
+| --- | --- | --- | --- |
+| Original script | the planner | 0.843 | 100% |
+| Coordinated doctrine | the planner | 0.766 | 56% |
+| Coordinated doctrine | nobody | 0.636 | 54% |
+
+The planner still helps a lot against it, but it does not yet protect its own fighter: it loses it in almost half the battles. An attempt to make the planner count threats to its own aircraft made results worse and was dropped, so that is open. Full table: [`ml/OPPONENT.md`](ml/OPPONENT.md).
+
 **Noisy sensors.** Everything above uses a perfect picture. With sensing noise on (`edge-sim sensing --noise 0.7`), each sensor detects a contact only some of the time and reports a position that is a little off, worse at range, at low signature, behind cover and under jamming. A per-contact Kalman filter fuses the sensors' reports, rides through gaps of up to three ticks, then drops the track. The threat model and the planner see only that picture. Over 100 rollouts under heavy noise:
 
 | Picture | Position error | Tracks lost per rollout | Threat AUC | Mission value with the planner |
@@ -121,6 +131,7 @@ Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend ord
 
 - As blue, red's missiles, bomber, jet, stealth fighter, drone and jammer come at you. You run the one point defense by hand and fly a stealth fighter that can shoot aircraft down.
 - As red, you attack and the autonomy planner runs blue's defense and its fighter, working from the trained threat model's scores.
+- In the free sandbox (no game), **Red AI** is on by default so the scenario plays out as you advance time, and **Blue autopilot** can be switched on to watch both computers fight. Turn Red AI off to order red units yourself.
 - As blue you can also switch **Autopilot** on and watch the planner run the defense; each order and its reason goes in the decision log.
 
 The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side, the opponent's orders go into the decision log as actor `opponent`, and each visitor gets a separate world, so two people on the hosted demo do not disturb each other.
@@ -137,10 +148,11 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 114 CLI checks and 27 planner checks
+npm test               # 120 CLI checks and 27 planner checks
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
 npm run eval:autonomy  # the planner against simpler defense rules (quick version)
+npm run eval:opponent  # red's coordinated doctrine against the original script (quick version)
 npm run eval:tracking  # noisy sensing: tracker against no tracker (quick version)
 npm run sil            # simulator against a separate edge-node over TCP
 ```
@@ -171,7 +183,8 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 3. Make the noise-trained threat model the default and re-run every evaluation on it; then drop the assumption that detections arrive already matched to a contact
 4. ROS 2 bridge: observations and orders as topics
 5. Requirements table that maps each rule to the test that checks it
-6. Run the outcome-graded agent eval and compare the agent with the planner
+6. Teach the planner to protect its own fighter against red's coordinated doctrine
+7. Run the outcome-graded agent eval and compare the agent with the planner
 
 ## Safety line
 

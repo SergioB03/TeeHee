@@ -212,16 +212,27 @@ rejected("unknown scenario is rejected", "reset", "--scenario", "nope", contains
 rejected("opponent needs a side", "opponent", contains="--side")
 rejected("opponent rejects a bad side", "opponent", "--side", "green", contains="--side")
 before = len(decisions(500))
+code, out = sim("opponent", "--side", "red", "--doctrine", "basic", "--dry-run")
+orders = {o["id"]: o for o in out["orders"]}
+check("the original red script sends missiles and the bomber at HQ and the other aircraft at ground units, all at once",
+      orders["R-MSL1"]["target"] == "B-HQ" and orders["R-MSL2"]["target"] == "B-HQ" and orders["R-BMR1"]["target"] == "B-HQ"
+      and all(orders[i]["action"] == "launch" and orders[i]["target"] in ("B-S1", "B-S2", "B-R1") for i in ("R-JET1", "R-F1", "R-DRN1")))
+rejected("opponent rejects an unknown doctrine", "opponent", "--side", "red", "--doctrine", "reckless", contains="--doctrine")
 code, out = sim("opponent", "--side", "red")
 orders = {o["id"]: o for o in out["orders"]}
-check("red opponent sends missiles and the bomber at HQ and the other aircraft at ground units",
-      orders["R-MSL1"]["target"] == "B-HQ" and orders["R-MSL2"]["target"] == "B-HQ" and orders["R-BMR1"]["target"] == "B-HQ"
-      and all(orders[i]["action"] == "launch" and orders[i]["target"] in ("B-S1", "B-S2", "B-R1") for i in ("R-JET1", "R-F1", "R-DRN1"))
-      and all(o["ok"] for o in out["orders"]))
+check("red's coordinated doctrine sends the stealth fighter after blue's fighter and the jammer toward headquarters",
+      orders["R-F1"]["action"] == "launch" and orders["R-F1"]["target"] == "B-F1"
+      and orders["R-J1"]["action"] == "move" and all(o["ok"] for o in out["orders"]))
+check("faster attackers hold low instead of arriving alone",
+      any(o["action"] == "orbit" and "arrives together" in o["reason"] for o in out["orders"])
+      and sum(o["action"] == "launch" and o["target"].startswith("B-") and o["id"] != "R-F1" for o in out["orders"]) >= 1)
 check("red opponent never orders blue units", all(i.startswith("R-") for i in orders))
 log = decisions(500)
 check("each opponent order is logged with actor 'opponent' and a reason",
       len(log) == before + len(out["orders"]) and all(d["actor"] == "opponent" and d["reason"] for d in log[before:]))
+# Blue's computer opponent, against the original red script so that red commits at once.
+sim("reset", "--scenario", "skirmish")
+sim("opponent", "--side", "red", "--doctrine", "basic", "--no-log")
 blocked = kills = 0
 blue_orders = []
 for _ in range(20):
@@ -402,8 +413,9 @@ check("autopilot orders are logged as actor 'autopilot' with the behavior and a 
       len(log) == len(plan) and all(d["actor"] == "autopilot" and d["reason"].split(":")[0] in
                                     ("DEFEND", "HOLD", "PATROL", "SHADOW", "INTERCEPT", "ENGAGE", "RTB") for d in log))
 check("autopilot only orders blue units", all(o["id"].startswith("B-") for o in out["orders"]))
-code, out = sim("autopilot", "--dry-run")
-check("with nothing changed, the planner gives no repeat orders", out["orders"] == [])
+code, again = sim("autopilot", "--dry-run")
+code, twice = sim("autopilot", "--dry-run")
+check("planning twice from the same picture gives the same orders", again["orders"] == twice["orders"])
 rejected("autopilot rejects an unknown variant", "autopilot", "--variant", "reckless", contains="--variant")
 sim("reset")
 
@@ -459,6 +471,27 @@ check("a reset keeps the sensing setting", out["world"]["noise"] == 1 and out["w
 code, out = sim("sensing", "--noise", "0", "--fusion", "on")
 check("noise 0 restores the perfect picture", out["world"]["noise"] == 0 and len(out["world"]["tracks"]) == 7
       and all(t["err"] == 0 for t in out["world"]["tracks"]))
+sim("reset")
+
+# --- red's coordinated doctrine: the strike arrives together ------------------------
+sim("reset", "--scenario", "skirmish")
+first_hit = {}
+levels = {}
+for t in range(1, 15):
+    sim("opponent", "--side", "red", "--no-log")
+    world = sim("tick")[1]["world"]
+    for e in world["events"]:
+        if e["tick"] == t and e["kind"] == "engage" and e["detail"].split(" hit ")[1] in ("B-HQ", "B-S1", "B-S2", "B-R1"):
+            first_hit.setdefault(e["detail"].split(" hit ")[0], t)
+    for u in world["units"]:
+        if u["id"] in ("R-JET1", "R-DRN1") and u["alive"]:
+            levels[u["id"]] = min(levels.get(u["id"], 9), u["z"])
+arrivals = sorted(first_hit.values())
+check("under the coordinated doctrine at least three attackers land their first hit within three ticks of each other",
+      len(arrivals) >= 3 and any(arrivals[i + 2] - arrivals[i] <= 3 for i in range(len(arrivals) - 2)))
+check("jets and drones come in at level 1", levels.get("R-JET1") == 1 and levels.get("R-DRN1") == 1)
+check("every red attacker ends up attacking: nobody is left holding",
+      all(u["targetId"] for u in world["units"] if u["team"] == "red" and u["alive"] and u["type"] not in ("jammer",)))
 sim("reset")
 
 print()

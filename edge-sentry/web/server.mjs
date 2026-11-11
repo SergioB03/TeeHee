@@ -107,7 +107,7 @@ async function pruneSessions() {
 async function sessionFor(req) {
   const id = req.headers["x-session"];
   if (typeof id !== "string" || !SESSION_RE.test(id)) {
-    return { world: DEFAULT_WORLD, gameFile: DEFAULT_WORLD + ".game.json" };
+    return { world: DEFAULT_WORLD, gameFile: DEFAULT_WORLD + ".game.json", autoFile: DEFAULT_WORLD + ".auto.json", visitor: false };
   }
   const dir = path.join(sessionsDir, id);
   try {
@@ -116,7 +116,7 @@ async function sessionFor(req) {
     await pruneSessions();
     await mkdir(dir, { recursive: true });
   }
-  return { world: path.join(dir, "world.json"), gameFile: path.join(dir, "game.json") };
+  return { world: path.join(dir, "world.json"), gameFile: path.join(dir, "game.json"), autoFile: path.join(dir, "auto.json"), visitor: true };
 }
 
 // ---- play mode ----------------------------------------------------------------
@@ -129,6 +129,18 @@ async function loadGame(session) {
     return JSON.parse(await readFile(session.gameFile, "utf8"));
   } catch {
     return null;
+  }
+}
+
+// Who flies each side in the free sandbox. A visitor's sandbox starts with the
+// computer flying red, so the scenario plays out when they advance time. The
+// shared default world (API calls with no session) starts with both off.
+async function loadAuto(session) {
+  try {
+    const saved = JSON.parse(await readFile(session.autoFile, "utf8"));
+    return { red: Boolean(saved.red), blue: Boolean(saved.blue) };
+  } catch {
+    return { red: session.visitor, blue: false };
   }
 }
 
@@ -251,7 +263,8 @@ async function handleApi(req, res, route) {
   const session = await sessionFor(req);
   const game = await loadGame(session);
   const sim = (args) => runSim(session.world, "console", args);
-  const withGame = (result) => (result.ok ? { ...result, game: publicGame(game) } : result);
+  const auto = await loadAuto(session);
+  const withGame = (result) => (result.ok ? { ...result, game: publicGame(game), auto } : result);
 
   if (req.method === "GET" && route === "/api/state") {
     return send(res, 200, withGame(await sim(["status"])));
@@ -301,7 +314,36 @@ async function handleApi(req, res, route) {
       if (game.over) return bad(res, "This game is over. Start a new one to keep playing");
       return send(res, 200, await gameTick(session, game, n));
     }
-    return send(res, 200, withGame(await sim(["tick", "--n", String(n)])));
+    if (!auto.red && !auto.blue) return send(res, 200, withGame(await sim(["tick", "--n", String(n)])));
+    // The computer gives its orders before every tick, for whichever sides it flies.
+    const opponentOrders = [];
+    const autopilotOrders = [];
+    let last = null;
+    for (let i = 0; i < n; i++) {
+      if (auto.red) {
+        const plan = await runSim(session.world, "opponent", ["opponent", "--side", "red"]);
+        if (!plan.ok) return send(res, 200, plan);
+        for (const o of plan.orders ?? []) opponentOrders.push({ ...o, tick: plan.world.tick });
+      }
+      if (auto.blue) {
+        const plan = await runSim(session.world, "autopilot", ["autopilot"]);
+        if (!plan.ok) return send(res, 200, plan);
+        for (const o of plan.orders ?? []) autopilotOrders.push({ ...o, tick: plan.world.tick });
+      }
+      last = await sim(["tick", "--n", "1"]);
+      if (!last.ok) return send(res, 200, last);
+    }
+    return send(res, 200, { ...withGame(last), opponentOrders, autopilotOrders });
+  }
+
+  if (route === "/api/auto") {
+    if (game) return bad(res, "In a game the computer already flies the other side");
+    for (const side of ["red", "blue"]) {
+      if (body[side] !== undefined && typeof body[side] !== "boolean") return bad(res, `${side} must be true or false`);
+      if (body[side] !== undefined) auto[side] = body[side];
+    }
+    await writeFile(session.autoFile, JSON.stringify(auto));
+    return send(res, 200, withGame(await sim(["status"])));
   }
 
   if (route === "/api/order") {
