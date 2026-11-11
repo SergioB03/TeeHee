@@ -137,6 +137,7 @@ POLICIES = [
     ("notimed", "Planner with triage instead of timed point defense", planner("notimed")),
     ("nopatrol", "Planner without a patrol station", planner("nopatrol")),
     ("freefire", "Planner allowed to shoot contacts not yet labelled a threat", planner("freefire")),
+    ("closein", "Planner that treats a close approach to its fighter as hostile", planner("closein")),
 ]
 
 
@@ -206,8 +207,8 @@ for key, name, _ in POLICIES:
     a = avg[key]
     out.append(f"| {name} | {a['value']:.3f} | {gap(key):.0%} | {a['hits']:.2f} | {a['blocked']:.2f} | {a['down']:.2f} | {a['bystanders']:.2f} |")
 out.append("")
-out.append("The first four rows are the baselines, the fifth is the planner, and the last four are the planner with one "
-           "behavior switched off, to show what each one contributes. \"Share of the planner's gain\" is how much of the "
+out.append("The first four rows are the baselines, the fifth is the planner, and the last five are the planner with one "
+           "behavior switched off or one stricter rule switched on, to show what each one contributes. \"Share of the planner's gain\" is how much of the "
            "distance from no defense to the full planner a policy covers. Hits, blocks and kills are averages per rollout. "
            "\"Non-attackers shot down\" counts red aircraft that were never ordered to attack anything in that rollout: "
            "the simulator does not punish shooting them, so mission value alone would reward a fighter that shoots at "

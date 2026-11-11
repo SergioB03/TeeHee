@@ -97,13 +97,13 @@ int main(int argc, char** argv) {
     else if (a == "--bind" && more) bindAddr = argv[++i];
     else if (a == "--variant" && more) variant = argv[++i];
     else {
-      std::cerr << "usage: edge-node (--listen PORT [--bind ADDR] | --stdin) [--variant full|nolead|notimed|nopatrol|freefire]\n";
+      std::cerr << "usage: edge-node (--listen PORT [--bind ADDR] | --stdin) [--variant full|nolead|notimed|nopatrol|freefire|nodefense|gohome|untaught|closein|commit]\n";
       return 2;
     }
   }
   PlannerConfig cfg;
   if (!plannerConfigFromName(variant, cfg)) {
-    std::cerr << "bad --variant (expected full, nolead, notimed, nopatrol or freefire)\n";
+    std::cerr << "bad --variant (expected full, nolead, notimed, nopatrol, freefire, nodefense, gohome, untaught, closein or commit)\n";
     return 2;
   }
 

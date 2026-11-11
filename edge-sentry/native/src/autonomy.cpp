@@ -57,11 +57,42 @@ std::string num(double v, int digits = 1) {
   return o.str();
 }
 
+// Is this contact hunting one of our aircraft? By default only if it has just
+// hit one (a hostile act). Returns the aircraft, or nullptr.
+const OwnUnit* huntedBy(const Contact& c, const std::vector<const OwnUnit*>& aircraft, int mode) {
+  if (c.cls == "missile" || !profileByName(c.cls).airToAir) return nullptr;
+  for (const OwnUnit* a : aircraft) {
+    if (!c.hit.empty() && a->id == c.hit) return a;
+  }
+  if (mode == 0) return nullptr;  // only a hit counts
+  for (const OwnUnit* a : aircraft) {
+    const int now = cheb(a->x, a->y, c.x, c.y), before = cheb(a->x, a->y, c.x - c.vx, c.y - c.vy);
+    if (mode == 2) {
+      // Strict: inside two cells, at our level, and flying straight at us.
+      const double vx = c.vx, vy = c.vy, dx = a->x - (c.x - c.vx), dy = a->y - (c.y - c.vy);
+      const double speed = std::hypot(vx, vy), range = std::hypot(dx, dy);
+      const double aim = (speed > 0 && range > 0) ? (vx * dx + vy * dy) / (speed * range) : 0;
+      if (now <= 2 && now < before && std::abs(c.z - a->z) <= 1 && aim >= 0.9) return a;
+    } else if (now <= 3 && now < before && std::abs(c.z - a->z) <= 2) {
+      return a;
+    }
+  }
+  return nullptr;
+}
+
 // Expected loss this contact causes at each tick 1..H if nobody stops it.
-std::vector<double> lossTable(const Contact& c, const std::vector<const OwnUnit*>& assets, const Observation& o, int H) {
+std::vector<double> lossTable(const Contact& c, const std::vector<const OwnUnit*>& assets, const OwnUnit* prey,
+                              const Observation& o, int H) {
   std::vector<double> e(static_cast<size_t>(H + 1), 0.0);
-  if (assets.empty() || c.score <= 0) return e;
   const AirProfile& p = profileByName(c.cls);
+  if (prey) {
+    // It is after one of our aircraft, which take 50 a hit. A hit already
+    // landed is as good as certain intent; closing in is a strong sign.
+    const double intent = std::max(c.score, c.hit.empty() ? 0.6 : 0.95);
+    const int arrive = std::max(1, (std::max(0, cheb(prey->x, prey->y, c.x, c.y) - 1) + p.speed - 1) / p.speed);
+    for (int t = arrive; t <= H; ++t) e[static_cast<size_t>(t)] = intent * 50.0 * kPassHit * p.hitFactor * (H - t + 1);
+  }
+  if (assets.empty() || c.score <= 0) return e;
 
   if (c.jam > 0) {
     // An emitter: integrity lost by every asset inside its field, assuming it keeps moving as it is.
@@ -88,7 +119,7 @@ std::vector<double> lossTable(const Contact& c, const std::vector<const OwnUnit*
   const double pass = kPassHit * p.hitFactor;
   for (int t = arrive; t <= H; ++t) {
     const double lands = c.cls == "missile" ? pass * std::pow(1.0 - pass, t - arrive) : pass;
-    e[static_cast<size_t>(t)] = c.score * p.damage * lands * (H - t + 1);
+    e[static_cast<size_t>(t)] = std::max(e[static_cast<size_t>(t)], c.score * p.damage * lands * (H - t + 1));
   }
   return e;
 }
@@ -118,6 +149,11 @@ bool plannerConfigFromName(const std::string& name, PlannerConfig& out) {
   else if (name == "notimed") out.timedDefense = false;
   else if (name == "nopatrol") out.patrol = false;
   else if (name == "freefire") out.holdFire = false;
+  else if (name == "nodefense") out.selfDefense = false;
+  else if (name == "closein") out.huntMode = 2;
+  else if (name == "commit") out.commit = true;
+  else if (name == "gohome") out.pressOn = false;
+  else if (name == "untaught") { out.selfDefense = false; out.pressOn = false; }
   else if (name.rfind("trust", 0) == 0) out.coverTrust = std::atof(name.c_str() + 5) / 100.0;  // trust50, trust100: tuning runs
   else return false;
   return true;
@@ -126,8 +162,9 @@ bool plannerConfigFromName(const std::string& name, PlannerConfig& out) {
 std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cfg) {
   std::vector<PlanOrder> orders;
   const int H = std::max(1, cfg.horizon);
-  std::vector<const OwnUnit*> assets, hqs, fighters;
+  std::vector<const OwnUnit*> assets, hqs, fighters, aircraft;
   for (const auto& u : o.own) {
+    if (flies(u.type)) aircraft.push_back(&u);
     if (isAsset(u.type)) assets.push_back(&u);
     if (u.type == "hq") hqs.push_back(&u);
     if (isFighter(u.type)) fighters.push_back(&u);
@@ -135,7 +172,11 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
   const size_t n = o.contacts.size();
   std::vector<std::vector<double>> loss;
   loss.reserve(n);
-  for (const auto& c : o.contacts) loss.push_back(lossTable(c, assets, o, H));
+  std::vector<const OwnUnit*> prey(n, nullptr);  // the aircraft of ours each contact is hunting, if any
+  for (size_t i = 0; i < n; ++i) {
+    if (cfg.selfDefense) prey[i] = huntedBy(o.contacts[i], aircraft, cfg.huntMode);
+    loss.push_back(lossTable(o.contacts[i], assets, prey[i], o, H));
+  }
 
   // The simpler rule used for comparison: highest threat score x damage, never
   // looking at timing. Contacts point defense can lock come first.
@@ -184,7 +225,14 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
     const int killTicks = static_cast<int>(std::ceil(kHitsToKill / (kPassHit * fp.hitFactor)));
     int pick = -1, pickReach = 0, px = 0, py = 0, pz = 0;
     double pickGain = kMinGain;
-    if (f->hp > kBingoHp) {
+    // A damaged fighter stays out of new fights with armed aircraft, but not
+    // out of the battle: it still fights a contact hunting it (a hunter as
+    // fast as it is cannot be outrun), aircraft that cannot shoot back, and
+    // aircraft already seen attacking.
+    bool hunted = false;
+    for (size_t i = 0; i < n; ++i) hunted = hunted || prey[i] == f;
+    const bool hurt = f->hp <= kBingoHp;
+    if (!hurt || hunted || cfg.pressOn) {
       const double before = total(downAt);
       for (size_t i = 0; i < n; ++i) {
         const Contact& c = o.contacts[i];
@@ -196,6 +244,9 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
         trial[i] = reach + killTicks;
         double gain = before - total(trial);
         if (f->target == c.id) gain *= 1.15;  // a little loyalty to the current target, so it does not dither
+        if (prey[i] == f) gain *= 1.5;        // the one shooting at this fighter comes first
+        else if (hurt && !(cfg.pressOn && (!profileByName(c.cls).airToAir || !c.hit.empty())))
+          continue;  // damaged: leave armed aircraft alone until they have shown what they are doing
         if (gain > pickGain) {
           pickGain = gain;
           pick = static_cast<int>(i);
@@ -212,7 +263,12 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
       downAt[static_cast<size_t>(pick)] = pickReach + killTicks;
       const std::string why = "shooting it down by about tick " + std::to_string(o.tick + pickReach + killTicks) +
                               " saves an expected " + num(pickGain) + " hp-ticks";
-      if (cfg.holdFire && c.score < o.watchAt) {
+      // Hold fire below the watch line, with two exceptions: a contact hunting
+      // one of our aircraft may always be shot at, and a fighter already
+      // engaged stays on its target unless the score falls well below the line.
+      const bool defending = prey[static_cast<size_t>(pick)] != nullptr;
+      const bool committed = cfg.commit && f->target == c.id && f->action == "launch" && c.score >= 0.5 * o.watchAt;
+      if (cfg.holdFire && c.score < o.watchAt && !defending && !committed) {
         // Rules of engagement: not yet assessed as a threat, so no shooting.
         // Stay close enough to act the moment that changes.
         if (cheb(f->x, f->y, px, py) <= 1 && std::abs(f->z - pz) <= 1 && f->target.empty()) continue;
@@ -241,7 +297,7 @@ std::vector<PlanOrder> planDefense(const Observation& o, const PlannerConfig& cf
     }
 
     // Nothing worth shooting. Go home if damaged, otherwise wait where it can respond fastest.
-    const bool damaged = f->hp <= kBingoHp;
+    const bool damaged = f->hp <= kBingoHp && !hunted;
     if (assets.empty()) continue;
     double sx = 0, sy = 0;
     if (damaged && !hqs.empty()) {
@@ -355,7 +411,7 @@ std::string observationToJson(const Observation& o) {
     out << (i ? "," : "") << "{\"id\":" << jsonString(c.id) << ",\"cls\":" << jsonString(c.cls) << ",\"x\":" << c.x
         << ",\"y\":" << c.y << ",\"z\":" << c.z << ",\"vx\":" << c.vx << ",\"vy\":" << c.vy << ",\"vz\":" << c.vz
         << ",\"snr\":" << num(c.snr, 4) << ",\"locked\":" << (c.locked ? 1 : 0) << ",\"score\":" << num(c.score, 6)
-        << ",\"jam\":" << c.jam << "}";
+        << ",\"jam\":" << c.jam << ",\"hit\":" << jsonString(c.hit) << "}";
   }
   out << "]}";
   return out.str();
@@ -399,6 +455,7 @@ bool observationFromJson(const std::string& json, Observation& out) {
     c.locked = locked != 0;
     extractNumberField(obj, "score", c.score);
     extractIntField(obj, "jam", c.jam);
+    extractStringField(obj, "hit", c.hit);
     out.contacts.push_back(c);
   }
   return true;

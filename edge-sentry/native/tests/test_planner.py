@@ -33,8 +33,8 @@ def own(uid, kind, x, y, z=0, hp=100, act="none", tgt=""):
     return {"id": uid, "type": kind, "x": x, "y": y, "z": z, "hp": hp, "act": act, "tgt": tgt, "tx": -1, "ty": -1, "tz": -1}
 
 
-def contact(uid, cls, x, y, z, score, vx=0, vy=0, vz=0, locked=1, jam=0):
-    return {"id": uid, "cls": cls, "x": x, "y": y, "z": z, "vx": vx, "vy": vy, "vz": vz, "snr": 0.6, "locked": locked, "score": score, "jam": jam}
+def contact(uid, cls, x, y, z, score, vx=0, vy=0, vz=0, locked=1, jam=0, hit=""):
+    return {"id": uid, "cls": cls, "x": x, "y": y, "z": z, "vx": vx, "vy": vy, "vz": vz, "snr": 0.6, "locked": locked, "score": score, "jam": jam, "hit": hit}
 
 
 def plan(own_units, contacts, variant="full", raw=None):
@@ -88,8 +88,42 @@ _, o = plan(BASE + [own("B-F1", "stealth", 0, 0, 4)], [far], variant="nolead")
 check("without lead it simply pursues", o["B-F1"]["action"] == "launch")
 _, o = plan(BASE + [fighter], [contact("R-GS1", "sensor", 6, 5, 0, 0.9)])
 check("the fighter never goes after a ground unit", o["B-F1"]["mode"] == "PATROL")
-_, o = plan(BASE + [own("B-F1", "stealth", 9, 9, 4, hp=40)], [bomber])
-check("a damaged fighter breaks off and returns to headquarters", o["B-F1"]["mode"] == "RTB" and (o["B-F1"]["tx"], o["B-F1"]["ty"]) == (2, 2))
+hurt = own("B-F1", "stealth", 9, 9, 4, hp=40)
+armed = contact("R-JET1", "jet", 7, 7, 3, 0.80, vx=-1, vy=-1)
+_, o = plan(BASE + [hurt], [armed])
+check("a damaged fighter leaves an armed aircraft that has done nothing alone and returns to headquarters",
+      o["B-F1"]["mode"] == "RTB" and (o["B-F1"]["tx"], o["B-F1"]["ty"]) == (2, 2))
+_, o = plan(BASE + [hurt], [bomber])
+check("a damaged fighter still goes after a bomber, which cannot shoot back", o["B-F1"]["mode"] in ("ENGAGE", "INTERCEPT"))
+_, o = plan(BASE + [hurt], [dict(armed, hit="B-S1")])
+check("a damaged fighter still goes after an armed aircraft already seen hitting a blue unit",
+      o["B-F1"]["mode"] in ("ENGAGE", "INTERCEPT"))
+_, o = plan(BASE + [hurt], [bomber], variant="gohome")
+check("the go-home comparison variant sends a damaged fighter back whatever is out there",
+      o["B-F1"]["mode"] == "RTB" and (o["B-F1"]["tx"], o["B-F1"]["ty"]) == (2, 2))
+# --- self-defense ----------------------------------------------------------------
+hunter = contact("R-F1", "stealth", 6, 5, 4, 0.10, vx=-1, hit="B-F1")
+_, o = plan(BASE + [fighter], [hunter])
+check("self-defense: a contact that has hit our fighter is shot at even below the watch line",
+      o["B-F1"]["action"] == "launch" and o["B-F1"]["target"] == "R-F1")
+_, o = plan(BASE + [fighter], [hunter], variant="nodefense")
+check("without the self-defense rule it would not have shot back", o.get("B-F1", {}).get("action") != "launch")
+_, o = plan(BASE + [own("B-F1", "stealth", 5, 5, 4, hp=50)], [hunter])
+check("a damaged fighter does not turn and run from the contact hunting it: it fights",
+      o["B-F1"]["action"] == "launch" and o["B-F1"]["target"] == "R-F1")
+_, o = plan(BASE + [own("B-F1", "stealth", 5, 5, 4, hp=50)], [hunter, bomber])
+check("damaged and hunted, it fights the hunter before anything else", o["B-F1"]["target"] == "R-F1")
+_, o = plan(BASE + [fighter], [hunter, bomber])
+check("the contact shooting at this fighter comes before a bomber", o["B-F1"]["target"] == "R-F1")
+_, o = plan(BASE + [fighter], [hunter])
+check("point defense covers the contact that is hunting our fighter", o["B-HQ"]["target"] == "R-F1")
+_, o = plan(BASE + [fighter], [contact("R-F1", "stealth", 6, 5, 4, 0.10, vx=-1)])
+check("a fighter that is merely close and has not fired is not shot at", o.get("B-F1", {}).get("action") != "launch")
+_, o = plan(BASE + [fighter], [contact("R-F1", "stealth", 6, 5, 4, 0.10, vx=-1)], variant="closein")
+check("the close-in comparison variant treats that approach as hostile", o["B-F1"]["action"] == "launch")
+_, o = plan(BASE + [fighter], [contact("R-M1", "missile", 6, 5, 4, 0.10, vx=-1, hit="B-F1")])
+check("a missile is never treated as a hunter to dogfight", o.get("B-F1", {}).get("action") != "launch")
+
 _, o = plan(BASE + [own("B-F1", "stealth", 10, 10, 4)], [])
 check("with no contacts the fighter moves to a patrol station by the assets", o["B-F1"]["mode"] == "PATROL" and o["B-F1"]["tx"] <= 3 and o["B-F1"]["ty"] <= 4)
 _, o = plan(BASE + [own("B-F1", "stealth", 2, 3, 3, act="orbit")], [])

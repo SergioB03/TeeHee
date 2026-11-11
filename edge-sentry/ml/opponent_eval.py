@@ -52,14 +52,14 @@ def battle(seed):
     return units
 
 
-def play(sim, units, doctrine, defend):
+def play(sim, units, doctrine, defend, variant="full"):
     state = sim.load(units)
     blue = [u["id"] for u in units if u["team"] == "blue"]
     values, hits, first = [], 0, None
     for _ in range(TICKS):
         sim.run("opponent", "--side", "red", "--doctrine", doctrine)
         if defend:
-            sim.run("autopilot")
+            sim.run("autopilot", "--variant", variant)
         world = sim.run("tick")["world"]
         values.append(sum((u["hp"] / 100.0) * u["integrity"] for u in world["units"] if u["id"] in blue and u["alive"]) / len(blue))
         for e in world["events"]:
@@ -74,17 +74,21 @@ def play(sim, units, doctrine, defend):
 
 
 CASES = [
-    ("basic", False, "Original script", "nobody"),
-    ("basic", True, "Original script", "the planner"),
-    ("coordinated", False, "Coordinated doctrine", "nobody"),
-    ("coordinated", True, "Coordinated doctrine", "the planner"),
+    ("basic", False, "Original script", "nobody", "full"),
+    ("basic", True, "Original script", "the planner", "full"),
+    ("coordinated", False, "Coordinated doctrine", "nobody", "full"),
+    ("coordinated", True, "Coordinated doctrine", "the planner before either lesson", "untaught"),
+    ("coordinated", True, "Coordinated doctrine", "the planner with self-defense only", "gohome"),
+    ("coordinated", True, "Coordinated doctrine", "the planner with pressing on only", "nodefense"),
+    ("coordinated", True, "Coordinated doctrine", "the planner (both lessons)", "full"),
+    ("coordinated", True, "Coordinated doctrine", "the planner, a close approach also counts as hostile", "closein"),
 ]
 sim = simlab.Sim()
 totals = [{"value": 0.0, "hits": 0, "blue_lost": 0, "red_down": 0, "fighter": 0} for _ in CASES]
 for i in range(args.rollouts):
     units = battle(800000 + i)
-    for k, (doctrine, defend, _, _) in enumerate(CASES):
-        r = play(sim, units, doctrine, defend)
+    for k, (doctrine, defend, _, _, variant) in enumerate(CASES):
+        r = play(sim, units, doctrine, defend, variant)
         for key in totals[k]:
             totals[k][key] += r[key]
 avg = [{key: v / args.rollouts for key, v in t.items()} for t in totals]
@@ -96,7 +100,7 @@ out.append(f"Both sides flown by the computer over {args.rollouts} random battle
 out.append("")
 out.append("| Red flown by | Blue flown by | Blue mission value | Hits on blue | Blue units lost | Red aircraft shot down | Blue's fighter survives |")
 out.append("| --- | --- | --- | --- | --- | --- | --- |")
-for (_, _, red, blue), a in zip(CASES, avg):
+for (_, _, red, blue, _), a in zip(CASES, avg):
     out.append(f"| {red} | {blue} | {a['value']:.3f} | {a['hits']:.2f} | {a['blue_lost']:.2f} | {a['red_down']:.2f} | {a['fighter']:.0%} |")
 out.append("")
 out.append("The original script launched everything at once at the nearest target. The coordinated doctrine times the strike "
@@ -105,6 +109,23 @@ out.append("The original script launched everything at once at the nearest targe
            "It is built to beat a defense: against a blue that does nothing, holding to arrive together costs ticks and "
            "the two do about the same.")
 out.append("")
+out.append("The planner at first lost its fighter in almost half of these battles. Replaying them showed a damaged fighter "
+           "turning for home with a hunter as fast as it is on its tail, and hold-fire stopping it from shooting back at a "
+           "hunter the threat model scored low. Two lessons came out of that.")
+out.append("")
+out.append("Self-defense: a contact that has hit one of blue's aircraft may be shot at whatever its threat label, a damaged "
+           "fighter fights the contact hunting it instead of running, and point defense may cover the hunter.")
+out.append("")
+out.append("Pressing on: nothing is repaired at headquarters, so a damaged fighter that goes home just leaves the battle "
+           "while jets and drones keep hitting sensors. It now stays out of new fights with armed aircraft that have done "
+           "nothing yet, but keeps attacking aircraft that cannot shoot back (bombers, drones) and aircraft already seen "
+           "hitting a blue unit, which includes its own hunter.")
+out.append("")
+out.append("The two overlap: each alone stops the fighter turning its back on its hunter, so each alone gets most of the "
+           "gain, and together they add a little more. The last row also treats a fighter closing to two cells at blue's "
+           "level as hostile before it fires; `ml/AUTONOMY.md` shows what that costs in aircraft shot down that never "
+           "attacked.")
+out.append("")
 report = "\n".join(out)
 print(report)
 if not args.no_write:
@@ -112,9 +133,16 @@ if not args.no_write:
         f.write(report)
 
 if args.check:
+    before, defense, press, both = avg[3], avg[4], avg[5], avg[6]
     floors = [
-        ("the coordinated doctrine hurts a defended blue more than the original script", avg[3]["value"] < avg[1]["value"]),
-        ("the planner still beats no defense against the coordinated doctrine", avg[3]["value"] > avg[2]["value"]),
+        ("the coordinated doctrine hurt the planner more than the original script before it was taught", before["value"] < avg[1]["value"]),
+        ("the planner still beats no defense against the coordinated doctrine", both["value"] > avg[2]["value"]),
+        ("self-defense alone raises mission value against the coordinated doctrine", defense["value"] > before["value"]),
+        ("self-defense keeps the fighter alive more often", defense["fighter"] > before["fighter"]),
+        ("pressing on alone raises mission value against the coordinated doctrine", press["value"] > before["value"]),
+        ("a damaged fighter that stays in the battle shoots down more of red's aircraft", both["red_down"] > defense["red_down"]),
+        ("both lessons together do at least as well as either alone",
+         both["value"] >= max(defense["value"], press["value"]) - 0.01 and both["fighter"] >= before["fighter"]),
     ]
     for name, ok in floors:
         print(("PASS  " if ok else "FAIL  ") + name)

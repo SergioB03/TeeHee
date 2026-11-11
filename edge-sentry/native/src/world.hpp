@@ -44,6 +44,7 @@ struct Unit {
   int jamRadius = 0;        // for jammers
   std::string targetId;     // missiles / jets
   int lastHitTick = -1000;  // tick this unit last damaged another unit
+  std::string lastHitId;    // the unit it damaged then
   // Short track history, updated once per tick (see World::recordHistory).
   double c0 = 0, c1 = 0, c2 = 0;              // closing: now, 1 and 2 ticks ago
   double h0 = 0, h1 = 0, h2 = 0;              // heading: now, 1 and 2 ticks ago

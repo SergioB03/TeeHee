@@ -143,7 +143,10 @@ button.go { background: var(--ink); color: var(--paper); border-color: var(--ink
 .mode .enemy { color: var(--ink-soft); }
 .mode .result { font-size: 16px; padding: 10px 12px; border-left: 3px solid var(--ink); background: var(--paper-raised); }
 .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-.sides.three { grid-template-columns: 1fr 1fr 1fr; }
+/* In a game: the autopilot switch (or Play again, once the game is over) gets a full row so its label never
+   wraps on a narrow phone, with Switch sides and Leave game side by side underneath. */
+.sides.three { grid-template-columns: 1fr 1fr; }
+.sides.three #autopilot, .sides.three #again { grid-column: 1 / -1; }
 button.blue { border-color: var(--blue); color: var(--blue); background: var(--blue-wash); }
 button.red { border-color: var(--red); color: var(--red); background: var(--red-wash); }
 
@@ -297,23 +300,24 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
       </div>
       <p class="enemy">In the free sandbox, choose who the computer flies. A side it does not fly only moves when you order it.</p>
       <div class="sides">
-        <button id="autoRed" type="button" aria-pressed="false">Red AI: off</button>
+        <button id="autoRed" type="button" aria-pressed="false">Red autopilot: off</button>
         <button id="autoBlue" type="button" aria-pressed="false">Blue autopilot: off</button>
       </div>
       <p class="enemy" id="sandboxMoves" aria-live="polite" hidden></p>
     </div>
     <div id="modeGame" hidden>
       <p class="status" id="gameStatus"></p>
-      <p id="gameBrief"></p>
-      <p class="enemy" id="enemyMoves" aria-live="polite"></p>
-      <p class="enemy" id="autoMoves" aria-live="polite" hidden></p>
-      <p class="result" id="gameResult" hidden></p>
+      <!-- The buttons sit straight under the status line so they stay put however long the order text below gets. -->
       <div class="sides three">
         <button id="again" type="button">Play again</button>
         <button id="autopilot" type="button" aria-pressed="false" hidden>Autopilot: off</button>
         <button id="switchSides" type="button">Switch sides</button>
         <button class="quiet" id="leaveGame" type="button">Leave game</button>
       </div>
+      <p class="result" id="gameResult" hidden></p>
+      <p id="gameBrief"></p>
+      <p class="enemy" id="autoMoves" aria-live="polite" hidden></p>
+      <p class="enemy" id="enemyMoves" aria-live="polite"></p>
     </div>
   </section>
 
@@ -1042,15 +1046,18 @@ function renderLists() {
   }
 }
 
+// When several ticks are advanced at once, say each unit's latest order only, not every tick's.
+const latestOrders = (list) => [...new Map(list.map((o) => [o.id, o])).values()];
+
 function renderGame() {
   $("modeIdle").hidden = !!game;
-  for (const [id, on, label] of [["autoRed", auto.red, "Red AI"], ["autoBlue", auto.blue, "Blue autopilot"]]) {
+  for (const [id, on, label] of [["autoRed", auto.red, "Red autopilot"], ["autoBlue", auto.blue, "Blue autopilot"]]) {
     $(id).setAttribute("aria-pressed", String(on));
     $(id).textContent = `${label}: ${on ? "on" : "off"}`;
   }
   const said = [];
-  if (auto.red && enemyOrders.length) said.push(`Red ordered: ${enemyOrders.map((o) => `${o.id} ${o.action}${o.target ? " " + o.target : ""}`).join("; ")}`);
-  if (auto.blue && autoOrders.length) said.push(`Autonomy ordered: ${autoOrders.map((o) => `${o.id} ${o.reason.split(";")[0]}`).join("; ")}`);
+  if (auto.red && enemyOrders.length) said.push(`Red autopilot ordered: ${latestOrders(enemyOrders).map((o) => `${o.id} ${o.action}${o.target ? " " + o.target : ""}`).join("; ")}`);
+  if (auto.blue && autoOrders.length) said.push(`Blue autopilot ordered: ${latestOrders(autoOrders).map((o) => `${o.id} ${o.reason.split(";")[0]}`).join("; ")}`);
   $("sandboxMoves").hidden = !!game || !said.length;
   $("sandboxMoves").textContent = said.join(". ") + (said.length ? "." : "");
   $("modeGame").hidden = !game;
@@ -1065,20 +1072,24 @@ function renderGame() {
   $("gameStatus").textContent = `You command ${you}. Tick ${game.tick} of ${game.limit}. Blue mission value ${value}%.`;
   $("gameBrief").hidden = game.tick > 0;
   $("gameBrief").textContent = you === "blue"
-    ? "Red is about to attack with missiles, a bomber, a jet, a stealth fighter and a drone. Tap HQ, choose Defend, then tap a red contact: point defense covers one contact at a time and needs a lock on it. Your stealth fighter B-F1 can shoot aircraft down: tap it, choose Launch, then tap a red aircraft. Or turn Autopilot on and watch the autonomy planner run the defense; its reasons go in the decision log."
-    : "Blue's point defense and its fighter are run by the autonomy planner, working from the trained threat model's scores. Tap your units to launch, move, climb, dive, orbit or jam. Attackers must come down to hit, and anything flying low behind cover is hard for blue to lock. Break through before tick 20.";
-  const moves = enemyOrders.map((o) => {
+    ? "Red is about to attack with missiles, a bomber, a jet, a stealth fighter and a drone. Tap HQ, choose Defend, then tap a red contact: point defense covers one contact at a time and needs a lock on it. Your stealth fighter B-F1 can shoot aircraft down: tap it, choose Launch, then tap a red aircraft. Or turn Blue autopilot on and watch the autonomy planner run the defense; its reasons go in the decision log."
+    : "Blue's point defense and its fighter are run by the autonomy planner, working from the trained threat model's scores. Tap your units to launch, move, climb, dive, orbit or jam. Attackers must come down to hit, and anything flying low behind cover is hard for blue to lock. Break through before tick 20. Or turn Red autopilot on and the computer flies your strike for you.";
+  const moves = latestOrders(enemyOrders).map((o) => {
     const what = o.action === "move" ? `${o.id} moves to ${o.tx}, ${o.ty}` : `${o.id} ${o.action}${o.target ? " " + o.target : ""}`;
     return `${what} (${o.reason})`;
   });
-  // Autopilot: the autonomy planner runs blue's point defense and fighter each tick.
+  // Autopilot hands your own side to the computer, whichever side that is:
+  // blue to the autonomy planner, red to the coordinated strike doctrine.
   const pilot = $("autopilot");
-  pilot.hidden = you !== "blue" || game.over;
+  pilot.hidden = game.over;
   pilot.setAttribute("aria-pressed", String(game.autopilot));
-  pilot.textContent = game.autopilot ? "Autopilot: on" : "Autopilot: off";
-  const flown = autoOrders.map((o) => `${o.id} ${o.reason.split(";")[0]}`);
+  pilot.textContent = `${you === "blue" ? "Blue" : "Red"} autopilot: ${game.autopilot ? "on" : "off"}`;
+  const flown = latestOrders(autoOrders).map((o) => (you === "blue"
+    ? `${o.id} ${o.reason.split(";")[0]}`
+    : `${o.id} ${o.action}${o.target ? " " + o.target : ""} (${o.reason})`));
   $("autoMoves").hidden = !game.autopilot || game.over || game.tick === 0;
-  $("autoMoves").textContent = flown.length ? `Autonomy ordered: ${flown.join("; ")}.` : "Autonomy kept its orders.";
+  const flier = you === "blue" ? "Blue autopilot" : "Red autopilot";
+  $("autoMoves").textContent = flown.length ? `${flier} ordered: ${flown.join("; ")}.` : `${flier} kept its orders.`;
   $("enemyMoves").hidden = game.tick === 0 || game.over;
   $("enemyMoves").textContent = moves.length
     ? `${them === "blue" ? "Blue's model" : "Red"} ordered: ${moves.join("; ")}.`

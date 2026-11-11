@@ -15,7 +15,8 @@ Blue has the headquarters' point defense (covers one contact per tick, if it has
 | Planner with triage instead of timed point defense | 0.965 | 89% | 1.03 | 1.71 | 0.78 | 0.13 |
 | Planner without a patrol station | 0.974 | 100% | 0.83 | 1.74 | 0.83 | 0.11 |
 | Planner allowed to shoot contacts not yet labelled a threat | 0.977 | 103% | 0.73 | 1.42 | 0.97 | 0.66 |
+| Planner that treats a close approach to its fighter as hostile | 0.973 | 98% | 0.89 | 1.75 | 0.80 | 0.19 |
 
-The first four rows are the baselines, the fifth is the planner, and the last four are the planner with one behavior switched off, to show what each one contributes. "Share of the planner's gain" is how much of the distance from no defense to the full planner a policy covers. Hits, blocks and kills are averages per rollout. "Non-attackers shot down" counts red aircraft that were never ordered to attack anything in that rollout: the simulator does not punish shooting them, so mission value alone would reward a fighter that shoots at everything. No policy can see which aircraft those are.
+The first four rows are the baselines, the fifth is the planner, and the last five are the planner with one behavior switched off or one stricter rule switched on, to show what each one contributes. "Share of the planner's gain" is how much of the distance from no defense to the full planner a policy covers. Hits, blocks and kills are averages per rollout. "Non-attackers shot down" counts red aircraft that were never ordered to attack anything in that rollout: the simulator does not punish shooting them, so mission value alone would reward a fighter that shoots at everything. No policy can see which aircraft those are.
 
 Head to head on mission value, the planner beat the scripted fighter policy in 72 of 150 rollouts and lost in 16; the rest were ties.

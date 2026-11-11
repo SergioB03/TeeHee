@@ -52,8 +52,8 @@ The last column matters because the simulator does not punish shooting an aircra
 | Check | Result |
 | --- | --- |
 | Ticks where the node's orders differed from the in-simulator planner | 0 of 880 |
-| Planning time in the node, median and worst | 38 µs and 121 µs |
-| TCP round trip, median and 99th percentile | 0.26 ms and 0.44 ms |
+| Planning time in the node, median and 99th percentile | 37 µs and 109 µs |
+| TCP round trip, median and 99th percentile | 0.25 ms and 0.42 ms |
 | Mission value on a direct link, losing 30% of messages, losing 60%, link down | 0.970, 0.964, 0.950, 0.878 |
 
 A reply that misses the 50 ms tick budget is thrown away and units keep their last orders, so a bad link degrades gradually and a dead one is exactly as good as no autonomy (0.878), never worse. Those timings are from the development machine. CI also cross-compiles the node for arm64 and runs the same tests under emulation, which shows the build is right for a Raspberry Pi or Jetson but says nothing about their speed; it has not been timed on a physical device yet.
@@ -63,10 +63,20 @@ A reply that misses the 50 ms tick budget is thrown away and units keep their la
 | Red flown by | Blue flown by | Blue mission value | Blue's fighter survives |
 | --- | --- | --- | --- |
 | Original script | the planner | 0.843 | 100% |
-| Coordinated doctrine | the planner | 0.766 | 56% |
 | Coordinated doctrine | nobody | 0.636 | 54% |
+| Coordinated doctrine | the planner, before the two lessons below | 0.766 | 56% |
+| Coordinated doctrine | **the planner** | **0.824** | **91%** |
 
-The planner still helps a lot against it, but it does not yet protect its own fighter: it loses it in almost half the battles. An attempt to make the planner count threats to its own aircraft made results worse and was dropped, so that is open. Full table: [`ml/OPPONENT.md`](ml/OPPONENT.md).
+The third row is where the planner stood at first: it lost its fighter in almost half the battles. My first fix (count every armed contact as a threat to the fighter) made results worse. Instead of dropping it I replayed the losses, and they showed two rules working against the fighter:
+
+- **Self-defense.** A damaged fighter turned for home with a hunter as fast as it is on its tail, and hold-fire stopped it shooting back at a hunter the threat model scored low. A contact that has hit one of blue's aircraft is now hostile whatever its score, the fighter fights it instead of running, and point defense may cover it. Alone this gets 0.815 and 91%.
+- **Pressing on.** With that fixed, the fighter won its duel, came out damaged, and sat over headquarters for a third of the remaining battle while jets and drones kept hitting sensors. Nothing is repaired there. A damaged fighter now starts no fight with an armed aircraft that has done nothing yet, but keeps attacking aircraft that cannot shoot back and aircraft already seen hitting a blue unit. Red aircraft shot down go from 1.90 to 2.54 per battle.
+
+Both were tuned on separate battles and then measured on these, and neither changes the 150-rollout table above (0.974, 0.11). Going one step further and treating a fighter that closes to two cells as hostile before it fires gets 0.832 and 94% here but shoots down more aircraft that never attacked (0.19 against 0.11), so it is not the default. Full table, with each lesson on its own: [`ml/OPPONENT.md`](ml/OPPONENT.md).
+
+**ROS 2.** The same observation and plan are also typed ROS 2 messages ([`ros2/`](ros2/README.md)): the simulator and the planner run as two separate nodes that talk over topics. CI builds both packages in the official ROS 2 Jazzy container, runs the two nodes, and checks from a third node that every plan on the topic is exactly what the planner gives for that observation and that the orders take effect.
+
+**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 38 requirements (rules of engagement, interface, sensing, model, simulator, web console) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
 
 **Noisy sensors.** Everything above uses a perfect picture. With sensing noise on (`edge-sim sensing --noise 0.7`), each sensor detects a contact only some of the time and reports a position that is a little off, worse at range, at low signature, behind cover and under jamming. A per-contact Kalman filter fuses the sensors' reports, rides through gaps of up to three ticks, then drops the track. The threat model and the planner see only that picture. Over 100 rollouts under heavy noise:
 
@@ -114,6 +124,8 @@ flowchart LR
 | `native/node/` | `edge-node`: the autonomy planner as a standalone TCP program for an edge computer |
 | `sil/` | Software-in-the-loop harness, link emulation and results |
 | `docs/INTERFACE.md` | The message contract between the picture and the autonomy |
+| `docs/REQUIREMENTS.md` | Each requirement and the checks that verify it (generated by `tools/trace.py`) |
+| `ros2/` | ROS 2 messages and two nodes that run the simulator and the planner over topics |
 | `web/` | Phone console: `server.mjs`, `index.html`, `run.sh` |
 | `evals/` | Agent evals: tool routing, and an outcome-graded eval that scores the agent's defensive decisions |
 
@@ -131,10 +143,10 @@ Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend ord
 
 - As blue, red's missiles, bomber, jet, stealth fighter, drone and jammer come at you. You run the one point defense by hand and fly a stealth fighter that can shoot aircraft down.
 - As red, you attack and the autonomy planner runs blue's defense and its fighter, working from the trained threat model's scores.
-- In the free sandbox (no game), **Red AI** is on by default so the scenario plays out as you advance time, and **Blue autopilot** can be switched on to watch both computers fight. Turn Red AI off to order red units yourself.
-- As blue you can also switch **Autopilot** on and watch the planner run the defense; each order and its reason goes in the decision log.
+- On either side you can switch **Autopilot** on and the computer flies your side as well: the autonomy planner for blue, the coordinated strike for red. Switch it off and your units do nothing until you order them.
+- In the free sandbox (no game), **Red autopilot** is on by default so the scenario plays out as you advance time, and **Blue autopilot** can be switched on to watch both computers fight. Turn Red autopilot off to order red units yourself.
 
-The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side, the opponent's orders go into the decision log as actor `opponent`, and each visitor gets a separate world, so two people on the hosted demo do not disturb each other.
+The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side. The opponent's orders go into the decision log as actor `opponent` and your own side's autopilot as `autopilot`, each with its reason. Each visitor gets a separate world, game and autopilot switches, so people on the hosted demo do not disturb each other; a test runs twelve visitors at once to check that.
 
 Agent playground:
 
@@ -148,7 +160,9 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 120 CLI checks and 27 planner checks
+npm test               # 122 CLI checks and 39 planner checks
+npm run test:web       # twelve visitors at once on the web console: both sides, autopilot on and off
+npm run trace          # every requirement still names a check that exists
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
 npm run eval:autonomy  # the planner against simpler defense rules (quick version)
@@ -171,9 +185,10 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 - The GRU runs in plain C++ with no ML runtime: weights are compiled in, and each contact's hidden state is saved in the world file and advanced exactly once per tick, however many times the world is read in between.
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
+- Because the simulator is deterministic, visitors who do the same thing must get exactly the same result. `web/test_sessions.py` uses that: it runs twelve visitors in parallel on different sides and fails if any two that should match differ, which is how it would catch one visitor's game leaking into another's.
 - Sensor noise is drawn from a hash of the seed, tick, contact and sensor rather than a running generator, so a noisy run replays exactly and does not depend on how many times the world was read. With noise at 0 the tracker is skipped entirely and every earlier result is unchanged.
-- The planner keeps nothing between ticks. Everything it needs is in the observation, so the in-simulator copy and the edge node cannot drift apart, and a node that restarts is correct again on the next message. The observation never contains a contact's orders or target, and a test checks that.
-- The planner's rules are pinned by 27 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off or goes home.
+- The planner keeps nothing between ticks. Everything it needs is in the observation, so the in-simulator copy and the edge node cannot drift apart, and a node that restarts is correct again on the next message. The observation never contains a contact's orders or target; the only hint of intent is which blue unit it has just hit, which blue can see for itself. Tests check both.
+- The planner's rules are pinned by 39 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off, goes home, or stays in the fight when damaged.
 - [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) records a code review of the first version: five bugs found, fixed, and covered by regression tests.
 
 ## Roadmap
@@ -181,10 +196,9 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 1. Time the edge node on a physical Raspberry Pi or Jetson (`sil/README.md` has the two commands)
 2. A learned policy (reinforcement learning) compared with the planner on the same rollouts
 3. Make the noise-trained threat model the default and re-run every evaluation on it; then drop the assumption that detections arrive already matched to a contact
-4. ROS 2 bridge: observations and orders as topics
-5. Requirements table that maps each rule to the test that checks it
-6. Teach the planner to protect its own fighter against red's coordinated doctrine
-7. Run the outcome-graded agent eval and compare the agent with the planner
+4. Teach the planner to break up a strike timed to arrive together, which is how red's doctrine still gets hits through
+5. Link the planner into a C++ ROS 2 node and measure it over a lossy link
+6. Run the outcome-graded agent eval and compare the agent with the planner
 
 ## Safety line
 
