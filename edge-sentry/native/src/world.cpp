@@ -113,26 +113,7 @@ bool orderFromString(const std::string& s, OrderAction& out) {
   return true;
 }
 
-// Game numbers, not real performance data. The stealth fighter is fast and
-// hard to see, the bomber slow, obvious and heavy-hitting from high level,
-// the drone slow and low. Missiles may hit from any level.
-const AirProfile& profileOf(UnitType t) {
-  //                                  speed climb ceil cruise release sig   dmg  hit   a2a
-  static const AirProfile ground   = {1,    0,    0,   0,     0,      1.0,  0,   0.0,  false};
-  static const AirProfile jet      = {1,    1,    5,   3,     2,      1.0,  15,  0.6,  true};
-  static const AirProfile stealth  = {2,    2,    5,   4,     3,      0.35, 20,  0.7,  true};
-  static const AirProfile bomber   = {1,    1,    5,   4,     4,      1.3,  35,  0.5,  false};
-  static const AirProfile drone    = {1,    1,    2,   1,     1,      0.5,  8,   0.5,  false};
-  static const AirProfile missile  = {1,    1,    5,   2,     5,      0.8,  40,  1.0,  true};
-  switch (t) {
-    case UnitType::Jet: return jet;
-    case UnitType::Stealth: return stealth;
-    case UnitType::Bomber: return bomber;
-    case UnitType::Drone: return drone;
-    case UnitType::Missile: return missile;
-    default: return ground;
-  }
-}
+const AirProfile& profileOf(UnitType t) { return profileByName(unitTypeToString(t)); }
 
 bool isAircraft(UnitType t) { return profileOf(t).ceiling > 0; }
 
@@ -260,83 +241,17 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
   };
 
   if (side == Team::Blue) {
-    const Unit* hq = nullptr;
-    for (const auto& u : units) {
-      if (u.alive && u.team == Team::Blue && u.type == UnitType::HQ) {
-        hq = &u;
-        break;
-      }
-    }
-    if (!hq) return moves;
-    // Expected loss per contact: threat score x the damage its type can do.
-    auto valueOf = [&](const Track& t) -> double {
-      const Unit* u = findUnit(t.sourceUnitId);
-      if (!u || !u->alive || t.threat.learnedScore < learnedWatchAt()) return 0;
-      const double severity = u->type == UnitType::Jammer ? 3 : profileOf(u->type).damage;
-      return t.threat.learnedScore * severity;
-    };
-    const Track* best = nullptr;
-    double bestValue = 0;
-    // Point defense cannot shoot at a track that is too weak, so prefer
-    // contacts it has a lock on and fall back to the rest.
-    for (int pass = 0; pass < 2 && !best; ++pass) {
-      for (const auto& t : tracks) {
-        if (pass == 0 && !t.locked) continue;
-        const double value = valueOf(t);
-        if (value > bestValue) {
-          bestValue = value;
-          best = &t;
-        }
-      }
-    }
-    const bool defending = hq->order.action == OrderAction::Defend;
-    if (best && !(defending && hq->order.targetId == best->sourceUnitId)) {
-      std::ostringstream why;
-      why.precision(2);
-      why << best->sourceUnitId << " reads " << labelForScore(best->threat.learnedScore, ScorerKind::Learned) << " at "
-          << std::fixed << best->threat.learnedScore << ", the highest expected loss";
+    // Blue is flown by the autonomy planner, from the same observation message
+    // an edge node would receive.
+    for (const auto& p : planDefense(observe())) {
       OpponentMove m;
-      m.id = hq->id;
-      m.action = OrderAction::Defend;
-      m.targetId = best->sourceUnitId;
-      m.reason = why.str();
-      moves.push_back(m);
-    } else if (!best && defending) {
-      OpponentMove m;
-      m.id = hq->id;
-      m.action = OrderAction::Cease;
-      m.reason = "no contact is above the watch line";
-      moves.push_back(m);
-    }
-    // Blue fighters intercept the most dangerous aircraft the HQ is not covering.
-    std::vector<std::string> taken;
-    if (best) taken.push_back(best->sourceUnitId);
-    for (const auto& f : units) {
-      if (!f.alive || f.team != Team::Blue || !(f.type == UnitType::Jet || f.type == UnitType::Stealth)) continue;
-      const Unit* current = f.targetId.empty() ? nullptr : findUnit(f.targetId);
-      if (current && current->alive) {
-        taken.push_back(current->id);
-        continue;
-      }
-      const Track* pick = nullptr;
-      double pickValue = 0;
-      for (const auto& t : tracks) {
-        const Unit* u = findUnit(t.sourceUnitId);
-        if (!u || !isAircraft(u->type)) continue;
-        if (std::find(taken.begin(), taken.end(), t.sourceUnitId) != taken.end()) continue;
-        const double value = valueOf(t);
-        if (value > pickValue) {
-          pickValue = value;
-          pick = &t;
-        }
-      }
-      if (!pick) continue;
-      taken.push_back(pick->sourceUnitId);
-      OpponentMove m;
-      m.id = f.id;
-      m.action = OrderAction::Launch;
-      m.targetId = pick->sourceUnitId;
-      m.reason = "intercept " + pick->sourceUnitId + ", the most dangerous aircraft not covered by point defense";
+      m.id = p.id;
+      orderFromString(p.action, m.action);
+      m.tx = p.tx;
+      m.ty = p.ty;
+      m.tz = p.tz;
+      m.targetId = p.target;
+      m.reason = p.reason;
       moves.push_back(m);
     }
     return moves;
@@ -385,6 +300,42 @@ std::vector<OpponentMove> World::planOpponent(Team side) const {
     }
   }
   return moves;
+}
+
+Observation World::observe() const {
+  Observation o;
+  o.tick = tick;
+  o.width = width;
+  o.height = height;
+  o.ceiling = kCeiling;
+  o.watchAt = learnedWatchAt();
+  for (const auto& u : units) {
+    if (!u.alive || u.team != Team::Blue) continue;
+    OwnUnit own;
+    own.id = u.id;
+    own.type = unitTypeToString(u.type);
+    own.x = u.x; own.y = u.y; own.z = u.z;
+    own.hp = u.hp;
+    own.action = orderToString(u.order.action);
+    own.target = u.order.action == OrderAction::Defend ? u.order.targetId : u.targetId;
+    own.tx = u.order.tx; own.ty = u.order.ty; own.tz = u.order.tz;
+    o.own.push_back(own);
+  }
+  for (const auto& t : tracks) {
+    const Unit* u = findUnit(t.sourceUnitId);
+    if (!u || !u->alive) continue;
+    Contact c;
+    c.id = u->id;
+    c.cls = unitTypeToString(u->type);
+    c.x = u->x; c.y = u->y; c.z = t.z;
+    c.vx = static_cast<int>(t.vx); c.vy = static_cast<int>(t.vy); c.vz = t.vz;
+    c.snr = t.snr;
+    c.locked = t.locked;
+    c.score = t.threat.learnedScore;
+    c.jam = u->type == UnitType::Jammer ? u->jamRadius : 0;
+    o.contacts.push_back(c);
+  }
+  return o;
 }
 
 void World::reset() { *this = defaultScenario(); }

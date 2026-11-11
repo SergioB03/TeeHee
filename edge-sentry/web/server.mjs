@@ -156,6 +156,7 @@ function publicGame(game) {
     blocked: game.blocked,
     lost: game.lost,
     shotDown: game.shotDown ?? 0,
+    autopilot: Boolean(game.autopilot),
   };
 }
 
@@ -170,11 +171,18 @@ async function startGame(session, side) {
 async function gameTick(session, game, n) {
   const other = game.side === "blue" ? "red" : "blue";
   const opponentOrders = [];
+  const autopilotOrders = [];
   let last = null;
   for (let i = 0; i < n && !game.over; i++) {
     const plan = await runSim(session.world, "opponent", ["opponent", "--side", other]);
     if (!plan.ok) return plan;
     for (const o of plan.orders ?? []) opponentOrders.push({ ...o, tick: plan.world.tick });
+    if (game.side === "blue" && game.autopilot) {
+      // The player has handed blue to the autonomy planner for this tick.
+      const auto = await runSim(session.world, "autopilot", ["autopilot"]);
+      if (!auto.ok) return auto;
+      for (const o of auto.orders ?? []) autopilotOrders.push({ ...o, tick: auto.world.tick });
+    }
     last = await runSim(session.world, "console", ["tick", "--n", "1"]);
     if (!last.ok) return last;
     const world = last.world;
@@ -193,7 +201,7 @@ async function gameTick(session, game, n) {
   }
   await saveGame(session, game);
   if (!last) last = await runSim(session.world, "console", ["status"]);
-  return { ...last, game: publicGame(game), opponentOrders };
+  return { ...last, game: publicGame(game), opponentOrders, autopilotOrders };
 }
 
 // ---- http ---------------------------------------------------------------------
@@ -261,6 +269,15 @@ async function handleApi(req, res, route) {
   if (route === "/api/game/start") {
     if (!TEAMS.has(body.side)) return bad(res, "side must be blue or red");
     return send(res, 200, await startGame(session, body.side));
+  }
+
+  if (route === "/api/game/autopilot") {
+    if (!game) return bad(res, "Start a game first");
+    if (game.side !== "blue") return bad(res, "Autopilot flies blue; you are commanding red");
+    if (typeof body.on !== "boolean") return bad(res, "on must be true or false");
+    game.autopilot = body.on;
+    await saveGame(session, game);
+    return send(res, 200, withGame(await sim(["status"])));
   }
 
   if (route === "/api/game/end") {

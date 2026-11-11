@@ -295,9 +295,11 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
       <p class="status" id="gameStatus"></p>
       <p id="gameBrief"></p>
       <p class="enemy" id="enemyMoves" aria-live="polite"></p>
+      <p class="enemy" id="autoMoves" aria-live="polite" hidden></p>
       <p class="result" id="gameResult" hidden></p>
       <div class="sides three">
         <button id="again" type="button">Play again</button>
+        <button id="autopilot" type="button" aria-pressed="false" hidden>Autopilot: off</button>
         <button id="switchSides" type="button">Switch sides</button>
         <button class="quiet" id="leaveGame" type="button">Leave game</button>
       </div>
@@ -418,6 +420,7 @@ let mode = null; // null | "move" | "launch" | "defend" | "spawn"
 let decisions = [];
 let game = null;          // { side, tick, limit, over, missionValue, hits, blocked, lost } while a game is on
 let enemyOrders = [];     // what the computer opponent ordered on the last advance
+let autoOrders = [];      // what the autonomy planner ordered for blue on the last advance
 let view = "3d";          // "2d" flat map or "3d" battlefield
 let yaw = -0.55;          // 3D view rotation about the vertical axis, radians
 try {
@@ -481,6 +484,7 @@ async function api(path, body) {
     world = data.world;
     if ("game" in data) game = data.game;
     if (data.opponentOrders) enemyOrders = data.opponentOrders;
+    if (data.autopilotOrders) autoOrders = data.autopilotOrders;
     loadDecisions();
     return true;
   } catch {
@@ -1003,12 +1007,20 @@ function renderGame() {
   $("gameStatus").textContent = `You command ${you}. Tick ${game.tick} of ${game.limit}. Blue mission value ${value}%.`;
   $("gameBrief").hidden = game.tick > 0;
   $("gameBrief").textContent = you === "blue"
-    ? "Red is about to attack with missiles, a bomber, a jet, a stealth fighter and a drone. Tap HQ, choose Defend, then tap a red contact: point defense covers one contact at a time and needs a lock on it. Your stealth fighter B-F1 can shoot aircraft down: tap it, choose Launch, then tap a red aircraft."
-    : "Blue's point defense and its fighter are run by the trained threat model. Tap your units to launch, move, climb, dive, orbit or jam. Attackers must come down to hit, and anything flying low behind cover is hard for blue to lock. Break through before tick 20.";
+    ? "Red is about to attack with missiles, a bomber, a jet, a stealth fighter and a drone. Tap HQ, choose Defend, then tap a red contact: point defense covers one contact at a time and needs a lock on it. Your stealth fighter B-F1 can shoot aircraft down: tap it, choose Launch, then tap a red aircraft. Or turn Autopilot on and watch the autonomy planner run the defense; its reasons go in the decision log."
+    : "Blue's point defense and its fighter are run by the autonomy planner, working from the trained threat model's scores. Tap your units to launch, move, climb, dive, orbit or jam. Attackers must come down to hit, and anything flying low behind cover is hard for blue to lock. Break through before tick 20.";
   const moves = enemyOrders.map((o) => {
     const what = o.action === "move" ? `${o.id} moves to ${o.tx}, ${o.ty}` : `${o.id} ${o.action}${o.target ? " " + o.target : ""}`;
     return `${what} (${o.reason})`;
   });
+  // Autopilot: the autonomy planner runs blue's point defense and fighter each tick.
+  const auto = $("autopilot");
+  auto.hidden = you !== "blue" || game.over;
+  auto.setAttribute("aria-pressed", String(game.autopilot));
+  auto.textContent = game.autopilot ? "Autopilot: on" : "Autopilot: off";
+  const flown = autoOrders.map((o) => `${o.id} ${o.reason.split(";")[0]}`);
+  $("autoMoves").hidden = !game.autopilot || game.over || game.tick === 0;
+  $("autoMoves").textContent = flown.length ? `Autonomy ordered: ${flown.join("; ")}.` : "Autonomy kept its orders.";
   $("enemyMoves").hidden = game.tick === 0 || game.over;
   $("enemyMoves").textContent = moves.length
     ? `${them === "blue" ? "Blue's model" : "Red"} ordered: ${moves.join("; ")}.`
@@ -1090,17 +1102,18 @@ async function onCell(x, y) {
 
 $("tick1").onclick = () => api("/api/tick", { n: 1 });
 $("tick5").onclick = () => api("/api/tick", { n: 5 });
-$("reset").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; await api("/api/reset", {}); };
+$("reset").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; autoOrders = []; await api("/api/reset", {}); };
 async function startGame(side) {
-  selectedId = null; mode = null; enemyOrders = [];
+  selectedId = null; mode = null; enemyOrders = []; autoOrders = [];
   await api("/api/game/start", { side });
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 $("playBlue").onclick = () => startGame("blue");
 $("playRed").onclick = () => startGame("red");
 $("again").onclick = () => game && startGame(game.side);
+$("autopilot").onclick = () => game && api("/api/game/autopilot", { on: !game.autopilot });
 $("switchSides").onclick = () => game && startGame(game.side === "blue" ? "red" : "blue");
-$("leaveGame").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; await api("/api/game/end", {}); };
+$("leaveGame").onclick = async () => { selectedId = null; mode = null; enemyOrders = []; autoOrders = []; await api("/api/game/end", {}); };
 $("cancel").onclick = () => setMode(null);
 
 function setView(next) {

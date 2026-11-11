@@ -1,6 +1,8 @@
 #pragma once
 
 #include "aiml_scorer.hpp"
+#include "autonomy.hpp"
+#include "profiles.hpp"
 
 #include <string>
 #include <vector>
@@ -16,18 +18,6 @@ constexpr double kLevelCells = 0.5;
 // Point defense needs a track at least this good to shoot at a contact.
 constexpr double kLockSnr = 0.2;
 
-// How a unit type flies and fights. Ground types have ceiling 0.
-struct AirProfile {
-  int speed;         // cells per tick
-  int climb;         // altitude levels per tick, up or down
-  int ceiling;       // highest level it can reach
-  int cruise;        // level it starts at
-  int release;       // must be at or below this level to hit a ground target
-  double signature;  // how strongly sensors see it (1 = ordinary)
-  double damage;     // to a ground target per hit
-  double hitFactor;  // multiplies the hit chance
-  bool airToAir;     // may attack aircraft
-};
 const AirProfile& profileOf(UnitType t);
 bool isAircraft(UnitType t);
 
@@ -140,6 +130,9 @@ struct World {
   bool isDefended(const std::string& id, std::string* byHq = nullptr) const;
   // Computer opponent: the orders `side` would give right now, with reasons.
   std::vector<OpponentMove> planOpponent(Team side) const;
+  // What blue can measure about itself and its contacts this tick: the only
+  // input the autonomy planner gets. No contact's orders or target are in it.
+  Observation observe() const;
   // z = -1 starts the unit at its type's cruise altitude.
   bool spawn(UnitType type, Team team, int x, int y, int z, std::string* err);
   bool issueOrder(const std::string& id, OrderAction action, int tx, int ty, int tz,
