@@ -107,8 +107,10 @@ jobs:
       - name: Messages are generated with the expected fields
         run: |
           source /opt/ros/jazzy/setup.bash && source ros2/install/setup.bash
-          ros2 interface show edge_sentry_msgs/msg/Observation | grep -q "Contact\[\] contacts"
-          ros2 interface show edge_sentry_msgs/msg/Plan | grep -q "Order\[\] orders"
+          ros2 interface show edge_sentry_msgs/msg/Observation > /tmp/observation.txt
+          ros2 interface show edge_sentry_msgs/msg/Plan > /tmp/plan.txt
+          grep -q "Contact\[\] contacts" /tmp/observation.txt
+          grep -q "Order\[\] orders" /tmp/plan.txt
       - name: Simulator and autonomy as two ROS 2 nodes talking over topics
         run: |
           source /opt/ros/jazzy/setup.bash && source ros2/install/setup.bash
