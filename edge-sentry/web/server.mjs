@@ -161,6 +161,8 @@ function publicGame(game) {
 }
 
 async function startGame(session, side) {
+  // Games are played on the perfect picture, whatever the sandbox was set to.
+  await runSim(session.world, "console", ["sensing", "--noise", "0", "--fusion", "on"]);
   const res = await runSim(session.world, "console", ["reset", "--scenario", "skirmish"]);
   if (!res.ok) return res;
   const game = { side, limit: GAME_TICKS, ticks: 0, sum: 0, hits: 0, blocked: 0, lost: 0, shotDown: 0, over: false };
@@ -333,6 +335,16 @@ async function handleApi(req, res, route) {
       if (unit.team !== game.side) return bad(res, `You command ${game.side} in this game, and ${id} is not yours`);
     }
     return send(res, 200, withGame(await sim(args)));
+  }
+
+  if (route === "/api/sensing") {
+    if (game) return bad(res, "Sensor settings are fixed during a game");
+    const { noise, fusion } = body;
+    if (typeof noise !== "number" || !(noise >= 0 && noise <= 1)) return bad(res, "noise must be a number from 0 to 1");
+    if (fusion !== undefined && typeof fusion !== "boolean") return bad(res, "fusion must be true or false");
+    const sensingArgs = ["sensing", "--noise", String(noise)];
+    if (fusion !== undefined) sensingArgs.push("--fusion", fusion ? "on" : "off");
+    return send(res, 200, withGame(await sim(sensingArgs)));
   }
 
   if (route === "/api/spawn") {

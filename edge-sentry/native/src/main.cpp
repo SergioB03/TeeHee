@@ -29,6 +29,10 @@ void usage() {
       << "  edge-sim --world <path> observe               the observation message blue's autonomy gets (no red orders or targets)\n"
       << "  edge-sim --world <path> autopilot [--variant full|nolead|notimed|nopatrol|freefire] [--dry-run]\n"
       << "                                                run the autonomy planner for blue and give its orders\n"
+      << "  edge-sim --world <path> sensing --noise F [--seed N] [--fusion on|off]\n"
+      << "                                                0 = perfect picture (default); up to 1 = sensors miss contacts and\n"
+      << "                                                report noisy positions, and blue sees its tracker's estimate.\n"
+      << "                                                --fusion off drops the tracker (best single detection only)\n"
       << "  edge-sim inputs                               names of the learned model's inputs, in order\n"
       << "Options:\n"
       << "  --scorer <learned|heuristic|sequence>   which threat scorer fills threatScore (default learned)\n"
@@ -75,12 +79,12 @@ struct Args {
 
 bool isCommand(const std::string& a) {
   return a == "status" || a == "reset" || a == "tick" || a == "score" || a == "spawn" || a == "order" ||
-         a == "decisions" || a == "inputs" || a == "opponent" || a == "observe" || a == "autopilot";
+         a == "decisions" || a == "inputs" || a == "opponent" || a == "observe" || a == "autopilot" || a == "sensing";
 }
 
 Args parseArgs(const std::vector<std::string>& raw) {
   static const std::set<std::string> kTakesValue = {
-      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side", "--variant",
+      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side", "--variant", "--noise", "--seed", "--fusion",
       "--x",     "--y",      "--z",     "--id",     "--action", "--tx",   "--ty",   "--tz",       "--target"};
   Args out;
   for (size_t i = 0; i < raw.size(); ++i) {
@@ -273,9 +277,19 @@ int main(int argc, char** argv) {
   std::string opponentOrders;  // JSON array, filled by the opponent command
   if (cmd == "reset") {
     const std::string scenario = argValue(args, "--scenario");
+    // A reset starts the scenario again; how blue senses is a setting and carries over.
+    const double keepNoise = world.noise;
+    const int keepSeed = world.seed;
+    const bool keepFusion = world.fusion;
     if (scenario.empty() || scenario == "default") world.reset();
     else if (scenario == "skirmish") world = World::skirmishScenario();
     else err = "bad --scenario (expected default or skirmish)";
+    if (err.empty() && keepNoise > 0) {
+      world.noise = keepNoise;
+      world.seed = keepSeed;
+      world.fusion = keepFusion;
+      world.scoreAllTracks();
+    }
   } else if (cmd == "opponent" || cmd == "autopilot") {
     Team side = Team::Blue;
     PlannerConfig variant;
@@ -327,6 +341,33 @@ int main(int argc, char** argv) {
         issued.push_back(o.str());
       }
       opponentOrders = "[" + joinComma(issued) + "]";
+      world.scoreAllTracks();
+    }
+  } else if (cmd == "sensing") {
+    double level = 0;
+    int seedValue = world.seed;
+    const std::string noiseText = argValue(args, "--noise"), seedText = argValue(args, "--seed"), fusionText = argValue(args, "--fusion");
+    bool parsed = !noiseText.empty();
+    try {
+      size_t used = 0;
+      if (parsed) { level = std::stod(noiseText, &used); parsed = used == noiseText.size(); }
+    } catch (...) {
+      parsed = false;
+    }
+    if (!parsed || level < 0 || level > 1) err = "bad --noise (expected a number from 0 to 1)";
+    else if (!seedText.empty() && !parseInt(seedText, seedValue)) err = "bad --seed";
+    else if (!fusionText.empty() && fusionText != "on" && fusionText != "off") err = "bad --fusion (expected on or off)";
+    else {
+      world.noise = level;
+      world.seed = seedValue;
+      if (!fusionText.empty()) world.fusion = fusionText == "on";
+      // Changing how blue senses starts every track again from nothing.
+      for (auto& u : world.units) {
+        u.tracked = false;
+        u.trkTick = -1;
+        u.misses = 0;
+        u.trk.clear();
+      }
       world.scoreAllTracks();
     }
   } else if (cmd == "status" || cmd == "observe") {

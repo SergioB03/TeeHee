@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <sstream>
 
 namespace {
@@ -327,7 +328,7 @@ Observation World::observe() const {
     Contact c;
     c.id = u->id;
     c.cls = unitTypeToString(u->type);
-    c.x = u->x; c.y = u->y; c.z = t.z;
+    c.x = static_cast<int>(t.x); c.y = static_cast<int>(t.y); c.z = t.z;  // where the track is, not where the unit is
     c.vx = static_cast<int>(t.vx); c.vy = static_cast<int>(t.vy); c.vz = t.vz;
     c.snr = t.snr;
     c.locked = t.locked;
@@ -567,12 +568,15 @@ Kinematics World::kinematics(const Unit& u) const {
 void World::recordHistory() {
   for (auto& u : units) {
     if (!u.alive) continue;
-    const Kinematics k = kinematics(u);
+    // History is what blue saw. With noisy sensing a contact with no track has none.
+    if (sensing() && u.team == Team::Red && !u.tracked) continue;
+    const Unit o = observedView(u);
+    const Kinematics k = kinematics(o);
     u.c2 = u.c1; u.c1 = u.c0; u.c0 = k.closing;
     u.h2 = u.h1; u.h1 = u.h0; u.h0 = k.heading;
     u.r3 = u.r2; u.r2 = u.r1; u.r1 = u.r0; u.r0 = (k.nearest < 1e8) ? k.nearest : -1;
-    u.a3 = u.a2; u.a2 = u.a1; u.a1 = u.a0; u.a0 = u.z;
-    if (u.x == u.px && u.y == u.py) {
+    u.a3 = u.a2; u.a2 = u.a1; u.a1 = u.a0; u.a0 = o.z;
+    if (o.x == o.px && o.y == o.py) {
       ++u.stopTicks;
     } else {
       u.stopTicks = 0;
@@ -592,22 +596,180 @@ bool World::coverBetween(int x1, int y1, int x2, int y2) const {
   return false;
 }
 
+double World::sensorSnr(const Unit& s, const Unit& u) const {
+  const double flat = dist(s.x, s.y, u.x, u.y);
+  const double up = kLevelCells * u.z;
+  const double slant = std::sqrt(flat * flat + up * up);
+  double base = std::min(1.0, std::max(0.0, 1.0 - slant / 10.0) * profileOf(u.type).signature);
+  // Terrain masking: anything at level 0 or 1 hides behind cover.
+  if (u.z <= 1 && coverBetween(s.x, s.y, u.x, u.y)) base *= 0.35;
+  const double jam = jamFieldAt(s.x, s.y, Team::Blue);
+  return base * (1.0 - 0.75 * jam) * s.integrity;
+}
+
 double World::observedSnr(const Unit& u) const {
-  const double signature = profileOf(u.type).signature;
   double best = 0.15;
   for (const auto& s : units) {
     if (!s.alive || s.team != Team::Blue) continue;
     if (!(s.type == UnitType::Sensor || s.type == UnitType::HQ || s.type == UnitType::Relay)) continue;
-    const double flat = dist(s.x, s.y, u.x, u.y);
-    const double up = kLevelCells * u.z;
-    const double slant = std::sqrt(flat * flat + up * up);
-    double base = std::min(1.0, std::max(0.0, 1.0 - slant / 10.0) * signature);
-    // Terrain masking: anything at level 0 or 1 hides behind cover.
-    if (u.z <= 1 && coverBetween(s.x, s.y, u.x, u.y)) base *= 0.35;
-    const double jam = jamFieldAt(s.x, s.y, Team::Blue);
-    best = std::max(best, base * (1.0 - 0.75 * jam) * s.integrity);
+    best = std::max(best, sensorSnr(s, u));
   }
   return best;
+}
+
+// --- sensing: detections and the tracker ---------------------------------------
+namespace {
+// Reproducible noise: a hash of (seed, tick, contact, sensor, draw), not a
+// stateful generator, so every CLI call sees the same draws for the same tick.
+uint64_t mix64(uint64_t x) {
+  x += 0x9E3779B97F4A7C15ULL;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+  return x ^ (x >> 31);
+}
+uint64_t nameHash(const std::string& s) {
+  uint64_t h = 1469598103934665603ULL;  // FNV-1a
+  for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
+  return h;
+}
+double uniform01(int seed, int tick, const std::string& id, int sensor, int draw) {
+  uint64_t h = mix64(static_cast<uint64_t>(seed) * 0x9E3779B97F4A7C15ULL + static_cast<uint64_t>(tick));
+  h = mix64(h ^ nameHash(id));
+  h = mix64(h ^ (static_cast<uint64_t>(sensor) * 1315423911ULL + static_cast<uint64_t>(draw)));
+  return (static_cast<double>(h >> 11) + 0.5) / 9007199254740992.0;
+}
+double gauss(int seed, int tick, const std::string& id, int sensor, int draw) {
+  const double a = uniform01(seed, tick, id, sensor, draw), b = uniform01(seed, tick, id, sensor, draw + 50);
+  return std::sqrt(-2.0 * std::log(a)) * std::cos(6.283185307179586 * b);
+}
+
+// One axis of a constant-velocity Kalman filter: position, velocity, and the
+// three distinct terms of their 2x2 covariance.
+struct Axis {
+  double p = 0, v = 0, a = 1, b = 0, c = 1;
+  void start(double z, double r) { p = z; v = 0; a = r + 0.05; b = 0; c = 1.0; }
+  void predict(double accel) {
+    p += v;
+    const double q = accel * accel;
+    const double a2 = a + 2 * b + c + q / 4, b2 = b + c + q / 2, c2 = c + q;
+    a = a2; b = b2; c = c2;
+  }
+  void update(double z, double r) {
+    const double s = a + r, k1 = a / s, k2 = b / s, innovation = z - p;
+    p += k1 * innovation;
+    v += k2 * innovation;
+    const double a2 = (1 - k1) * a, b2 = (1 - k1) * b, c2 = c - k2 * b;
+    a = a2; b = b2; c = c2;
+  }
+};
+constexpr int kCoastTicks = 3;       // a track with no detection for longer than this is dropped
+constexpr double kAccel = 0.7;       // how sharply a contact may change speed, cells per tick^2
+constexpr double kAccelAlt = 0.5;
+
+void loadAxes(const std::vector<double>& trk, Axis axes[3]) {
+  for (int i = 0; i < 3 && trk.size() >= 15; ++i) {
+    const size_t k = static_cast<size_t>(i) * 5;
+    axes[i] = {trk[k], trk[k + 1], trk[k + 2], trk[k + 3], trk[k + 4]};
+  }
+}
+void saveAxes(const Axis axes[3], std::vector<double>& trk) {
+  trk.clear();
+  for (int i = 0; i < 3; ++i) {
+    trk.push_back(axes[i].p); trk.push_back(axes[i].v); trk.push_back(axes[i].a); trk.push_back(axes[i].b); trk.push_back(axes[i].c);
+  }
+}
+// A new track knows nothing about the contact's past.
+void forgetHistory(Unit& u) {
+  u.c0 = u.c1 = u.c2 = 0;
+  u.h0 = u.h1 = u.h2 = 0;
+  u.r0 = u.r1 = u.r2 = u.r3 = -1;
+  u.a0 = u.a1 = u.a2 = u.a3 = -1;
+  u.stopTicks = 0;
+  u.moved = false;
+  u.seqHidden.clear();
+}
+}  // namespace
+
+void World::stepTrack(Unit& u) {
+  // Detections this tick: one per blue sensor that sees the contact.
+  struct Detection { double x, y, z, var, quality; };
+  std::vector<Detection> seen;
+  int index = 0;
+  for (const auto& s : units) {
+    ++index;
+    if (!s.alive || s.team != Team::Blue) continue;
+    if (!(s.type == UnitType::Sensor || s.type == UnitType::HQ || s.type == UnitType::Relay)) continue;
+    const double quality = sensorSnr(s, u);
+    const double detect = 1.0 - noise * (1.0 - std::max(0.0, std::min(1.0, 0.2 + 1.2 * quality)));
+    if (uniform01(seed, tick, u.id, index, 0) >= detect) continue;
+    const double sigma = noise * (0.25 + 1.1 * (1.0 - std::min(1.0, quality)));
+    seen.push_back({u.x + sigma * gauss(seed, tick, u.id, index, 1), u.y + sigma * gauss(seed, tick, u.id, index, 2),
+                    u.z + 0.8 * sigma * gauss(seed, tick, u.id, index, 3), sigma * sigma + 1e-4, quality});
+  }
+  std::sort(seen.begin(), seen.end(), [](const Detection& a, const Detection& b) { return a.quality > b.quality; });
+
+  const bool had = u.tracked;
+  Axis axes[3];
+  if (!fusion) {
+    // No tracker: the best single detection, and nothing at all without one.
+    if (seen.empty()) {
+      if (had) { u.tracked = false; ++u.drops; forgetHistory(u); }
+      return;
+    }
+    axes[0].start(seen[0].x, seen[0].var);
+    axes[1].start(seen[0].y, seen[0].var);
+    axes[2].start(seen[0].z, seen[0].var);
+    u.misses = 0;
+  } else if (!had) {
+    if (seen.empty()) return;
+    axes[0].start(seen[0].x, seen[0].var);
+    axes[1].start(seen[0].y, seen[0].var);
+    axes[2].start(seen[0].z, seen[0].var);
+    for (size_t i = 1; i < seen.size(); ++i) {
+      axes[0].update(seen[i].x, seen[i].var);
+      axes[1].update(seen[i].y, seen[i].var);
+      axes[2].update(seen[i].z, seen[i].var);
+    }
+    u.misses = 0;
+  } else {
+    loadAxes(u.trk, axes);
+    axes[0].predict(kAccel);
+    axes[1].predict(kAccel);
+    axes[2].predict(kAccelAlt);
+    if (seen.empty()) {
+      // Coast on the prediction for a few ticks, then give the track up.
+      if (++u.misses > kCoastTicks) {
+        u.tracked = false;
+        ++u.drops;
+        u.trk.clear();
+        forgetHistory(u);
+        return;
+      }
+    } else {
+      u.misses = 0;
+      for (const auto& d : seen) {  // fuse every sensor's detection, best first
+        axes[0].update(d.x, d.var);
+        axes[1].update(d.y, d.var);
+        axes[2].update(d.z, d.var);
+      }
+    }
+  }
+  saveAxes(axes, u.trk);
+  const int rx = clampi(static_cast<int>(std::lround(axes[0].p)), 0, width - 1);
+  const int ry = clampi(static_cast<int>(std::lround(axes[1].p)), 0, height - 1);
+  const int rz = clampi(static_cast<int>(std::lround(axes[2].p)), 0, profileOf(u.type).ceiling);
+  if (had) { u.opx = u.ox; u.opy = u.oy; u.opz = u.oz; }
+  else { u.opx = rx; u.opy = ry; u.opz = rz; forgetHistory(u); }  // a new track starts with no motion
+  u.ox = rx; u.oy = ry; u.oz = rz;
+  u.tracked = true;
+}
+
+Unit World::observedView(const Unit& u) const {
+  if (!sensing() || u.team != Team::Red) return u;
+  Unit o = u;
+  o.x = u.ox; o.y = u.oy; o.z = u.oz;
+  o.px = u.opx; o.py = u.opy; o.pz = u.opz;
+  return o;
 }
 
 void World::scoreAllTracks() {
@@ -615,28 +777,42 @@ void World::scoreAllTracks() {
   for (auto& u : units) {
     if (!u.alive) continue;
     if (u.team != Team::Red) continue; // blue sensors track red contacts in v1
+    // With noisy sensing the track is stepped once per tick (also on the first
+    // look at a hand-built world), and a contact with no track is not seen.
+    if (sensing() && u.trkTick != tick) {
+      stepTrack(u);
+      u.trkTick = tick;
+    }
+    if (sensing() && !u.tracked) continue;
+    const Unit o = observedView(u);  // everything below reads blue's belief, not the truth
 
     Track t;
     t.id = "T-" + u.id;
     t.sourceUnitId = u.id;
-    t.x = u.x;
-    t.y = u.y;
+    t.x = o.x;
+    t.y = o.y;
     // Observed velocity: displacement over the last tick.
-    t.vx = u.x - u.px;
-    t.vy = u.y - u.py;
+    t.vx = o.x - o.px;
+    t.vy = o.y - o.py;
     // The heuristic keeps its original order-based speed input so the
     // baseline scores are unchanged.
     const double orderSpeed = (u.order.action == OrderAction::Move) ? 1.0 : 0.0;
 
-    t.z = u.z;
-    t.vz = u.z - u.pz;
+    t.z = o.z;
+    t.vz = o.z - o.pz;
     t.snr = observedSnr(u);
     t.locked = t.snr >= kLockSnr;
+    t.ex = o.x; t.ey = o.y; t.ez = o.z;
+    if (sensing() && u.trk.size() >= 15) {
+      t.ex = u.trk[0]; t.ey = u.trk[5]; t.ez = u.trk[10];
+      t.err = std::sqrt(std::max(0.0, u.trk[2]) + std::max(0.0, u.trk[7]));
+      t.misses = u.misses;
+    }
 
     double nearestBlue = 1e9;
     for (const auto& b : units) {
       if (!b.alive || b.team != Team::Blue) continue;
-      nearestBlue = std::min(nearestBlue, dist(b.x, b.y, u.x, u.y));
+      nearestBlue = std::min(nearestBlue, dist(b.x, b.y, o.x, o.y));
     }
     const double prox = nearestBlue > 12 ? 0 : 1.0 - (nearestBlue / 12.0);
 
@@ -648,7 +824,7 @@ void World::scoreAllTracks() {
     // Emitters score as jam pressure; other contacts use friendly red EW cover.
     f.jamPressure = (u.type == UnitType::Jammer)
                         ? 0.9
-                        : jamFieldAt(u.x, u.y, Team::Blue);
+                        : jamFieldAt(o.x, o.y, Team::Blue);
     f.proximityBlue = prox;
     f.altitudeHint = isAircraft(u.type) ? 0.85 :
                      (u.type == UnitType::Jammer ? 0.35 : 0.2);
@@ -667,18 +843,18 @@ void World::scoreAllTracks() {
     // Inputs for the learned model, in modelInputNames() order. Nothing here
     // reads the contact's order or target: it is kinematics, a few ticks of
     // track history, emissions, and effects on blue assets.
-    const Kinematics k = kinematics(u);
+    const Kinematics k = kinematics(o);
     const double speedNow = std::sqrt(t.vx * t.vx + t.vy * t.vy);
     double blueInField = 0, ewCover = 0;
     if (u.type == UnitType::Jammer && u.jamRadius > 0) {
       for (const auto& b : units) {
         if (!b.alive || b.team != Team::Blue) continue;
         if (!(b.type == UnitType::Sensor || b.type == UnitType::HQ || b.type == UnitType::Relay)) continue;
-        const double d = dist(b.x, b.y, u.x, u.y);
+        const double d = dist(b.x, b.y, o.x, o.y);
         if (d < u.jamRadius) blueInField = std::max(blueInField, 1.0 - d / static_cast<double>(u.jamRadius));
       }
     } else {
-      ewCover = jamFieldAt(u.x, u.y, Team::Blue);
+      ewCover = jamFieldAt(o.x, o.y, Team::Blue);
     }
     const std::vector<double> inputs = {
         speedNow / 3.0,
@@ -698,9 +874,9 @@ void World::scoreAllTracks() {
         (speedNow <= 0) ? 1.0 : 0.0,
         k.miss,
         (k.heading >= 0.98) ? 1.0 : 0.0,
-        static_cast<double>(u.z) / kCeiling,
-        std::max(0, u.pz - u.z) / 2.0,
-        std::max(0, u.z - u.pz) / 2.0,
+        static_cast<double>(o.z) / kCeiling,
+        std::max(0, o.pz - o.z) / 2.0,
+        std::max(0, o.z - o.pz) / 2.0,
         std::min(u.stopTicks, 6) / 6.0,
         u.moved ? 1.0 : 0.0,
         (u.r3 >= 0 && nearestBlue < 1e8) ? (u.r3 - nearestBlue) / 6.0 : 0.0,
@@ -708,7 +884,7 @@ void World::scoreAllTracks() {
         u.h1,
         u.c2,
         u.h2,
-        (u.a3 >= 0) ? std::max(0.0, u.a3 - u.z) / kCeiling : 0.0,
+        (u.a3 >= 0) ? std::max(0.0, u.a3 - o.z) / kCeiling : 0.0,
     };
 
     // The sequence model sees each tick exactly once: advance its hidden
@@ -809,7 +985,7 @@ void World::tickOnce() {
     std::string blocker;
     if (wouldHit && isDefended(u.id, &blocker)) {
       // Point defense needs a usable track on a red contact to shoot at it.
-      if (u.team != Team::Red || observedSnr(u) >= kLockSnr) {
+      if (u.team != Team::Red || (observedSnr(u) >= kLockSnr && (!sensing() || u.tracked))) {
         events.push_back({tick, "blocked", u.id + " blocked by " + blocker});
         if (u.type == UnitType::Missile) {
           u.alive = false;
@@ -838,6 +1014,14 @@ void World::tickOnce() {
     }
   }
 
+  // Sensors look, and the tracker updates, before this tick's history is recorded.
+  if (sensing()) {
+    for (auto& u : units) {
+      if (!u.alive || u.team != Team::Red) continue;
+      stepTrack(u);
+      u.trkTick = tick;
+    }
+  }
   recordHistory();
 
   // Keep event log bounded
@@ -878,6 +1062,10 @@ std::string World::toJson(bool pretty) const {
       << "\"moved\":" << (u.moved ? 1 : 0) << ","
       << "\"seqTick\":" << u.seqTick << ","
       << "\"seqHidden\":[" << joinNumbers(u.seqHidden) << "],"
+      << "\"tracked\":" << (u.tracked ? 1 : 0) << ",\"trkTick\":" << u.trkTick << ",\"misses\":" << u.misses
+      << ",\"drops\":" << u.drops << ",\"ox\":" << u.ox << ",\"oy\":" << u.oy << ",\"oz\":" << u.oz
+      << ",\"opx\":" << u.opx << ",\"opy\":" << u.opy << ",\"opz\":" << u.opz << ","
+      << "\"trk\":[" << joinNumbers(u.trk) << "],"
       << "\"alive\":" << (u.alive ? "true" : "false") << ","
       << "\"order\":{"
       << "\"action\":" << jsonString(orderToString(u.order.action)) << ","
@@ -908,6 +1096,7 @@ std::string World::toJson(bool pretty) const {
       << "\"vz\":" << t.vz << ","
       << "\"snr\":" << t.snr << ","
       << "\"locked\":" << (t.locked ? "true" : "false") << ","
+      << "\"ex\":" << t.ex << ",\"ey\":" << t.ey << ",\"ez\":" << t.ez << ",\"err\":" << t.err << ",\"misses\":" << t.misses << ","
       << "\"threatScore\":" << t.threat.score << ","
       << "\"threatLabel\":" << jsonString(t.threat.label) << ","
       << "\"scorer\":" << jsonString(t.threat.scorer) << ","
@@ -946,6 +1135,7 @@ std::string World::toJson(bool pretty) const {
       << sp << "\"width\":" << width << "," << nl
       << sp << "\"height\":" << height << "," << nl
       << sp << "\"ceiling\":" << kCeiling << "," << nl
+      << sp << "\"noise\":" << noise << ",\"seed\":" << seed << ",\"fusion\":" << (fusion ? 1 : 0) << "," << nl
       << sp << "\"units\":[" << joinComma(unitJson) << "]," << nl
       << sp << "\"tracks\":[" << joinComma(trackJson) << "]," << nl
       << sp << "\"events\":[" << joinComma(eventJson) << "]," << nl
@@ -959,6 +1149,12 @@ World World::fromJson(const std::string& json) {
   extractIntField(json, "tick", w.tick);
   extractIntField(json, "width", w.width);
   extractIntField(json, "height", w.height);
+  extractNumberField(json, "noise", w.noise);
+  w.noise = std::max(0.0, std::min(1.0, w.noise));
+  extractIntField(json, "seed", w.seed);
+  int fusionFlag = 1;
+  extractIntField(json, "fusion", fusionFlag);
+  w.fusion = fusionFlag != 0;
 
   auto unitBody = extractArrayBody(json, "units");
   if (!unitBody.empty()) {
@@ -1005,6 +1201,19 @@ World World::fromJson(const std::string& json) {
       u.moved = movedFlag != 0;
       extractIntField(obj, "seqTick", u.seqTick);
       u.seqHidden = parseNumbers(extractArrayBody(obj, "seqHidden"));
+      int trackedFlag = 0;
+      extractIntField(obj, "tracked", trackedFlag);
+      u.tracked = trackedFlag != 0;
+      extractIntField(obj, "trkTick", u.trkTick);
+      extractIntField(obj, "misses", u.misses);
+      extractIntField(obj, "drops", u.drops);
+      extractIntField(obj, "ox", u.ox);
+      extractIntField(obj, "oy", u.oy);
+      extractIntField(obj, "oz", u.oz);
+      extractIntField(obj, "opx", u.opx);
+      extractIntField(obj, "opy", u.opy);
+      extractIntField(obj, "opz", u.opz);
+      u.trk = parseNumbers(extractArrayBody(obj, "trk"));
       extractNumberField(obj, "hp", u.hp);
       extractNumberField(obj, "integrity", u.integrity);
       extractIntField(obj, "jamRadius", u.jamRadius);

@@ -30,6 +30,8 @@ jobs:
         run: npm run eval:outcome
       - name: Autonomy planner evaluation (quick version)
         run: npm run eval:autonomy
+      - name: Sensing and tracker evaluation (quick version)
+        run: npm run eval:tracking
       - name: Software-in-the-loop (simulator plus a separate edge-node over TCP)
         run: npm run sil
       - name: Web console smoke test
@@ -41,6 +43,9 @@ jobs:
           curl -sf -X POST -H 'content-type: application/json' -d '{"id":"B-HQ","action":"defend","target":"R-JET1","reason":"ci smoke"}' http://127.0.0.1:3100/api/order | grep -q '"ok":true'
           curl -sf http://127.0.0.1:3100/api/decisions | grep -q '"reason":"ci smoke"'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"n":999}' http://127.0.0.1:3100/api/tick)" = 400
+          curl -sf -X POST -H 'content-type: application/json' -d '{"noise":0.7}' http://127.0.0.1:3100/api/sensing | grep -q '"noise":0.7'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"noise":7}' http://127.0.0.1:3100/api/sensing)" = 400
+          curl -sf -X POST -H 'content-type: application/json' -d '{"noise":0}' http://127.0.0.1:3100/api/sensing | grep -q '"noise":0,'
       - name: Play mode smoke test (choose a side, play the computer)
         run: |
           J='content-type: application/json'; S='x-session: cismoke000001'; B=http://127.0.0.1:3100

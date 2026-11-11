@@ -407,6 +407,60 @@ check("with nothing changed, the planner gives no repeat orders", out["orders"] 
 rejected("autopilot rejects an unknown variant", "autopilot", "--variant", "reckless", contains="--variant")
 sim("reset")
 
+# --- sensing: noisy detections and the tracker -------------------------------------
+code, out = sim("reset", "--scenario", "skirmish")
+w = out["world"]
+check("sensing is perfect by default: every contact tracked exactly where it is",
+      w["noise"] == 0 and len(w["tracks"]) == 7
+      and all((t["x"], t["y"], t["z"]) == (unit(w, t["sourceUnitId"])["x"], unit(w, t["sourceUnitId"])["y"], unit(w, t["sourceUnitId"])["z"]) for t in w["tracks"]))
+rejected("sensing rejects a noise level above 1", "sensing", "--noise", "1.5", contains="--noise")
+rejected("sensing needs a noise level", "sensing", contains="--noise")
+rejected("sensing rejects a bad fusion setting", "sensing", "--noise", "0.5", "--fusion", "maybe", contains="--fusion")
+
+
+def noisy_run(seed, fusion="on", ticks=12):
+    sim("reset", "--scenario", "skirmish")
+    sim("sensing", "--noise", "0", "--no-log")
+    sim("reset", "--scenario", "skirmish")
+    sim("opponent", "--side", "red", "--no-log")
+    sim("sensing", "--noise", "1", "--seed", str(seed), "--fusion", fusion)
+    pictures, error, seen, live = [], 0.0, 0, 0
+    for _ in range(ticks):
+        world = sim("tick")[1]["world"]
+        tracks = {t["sourceUnitId"]: t for t in world["tracks"]}
+        pictures.append(sorted((k, t["x"], t["y"], t["z"]) for k, t in tracks.items()))
+        for u in world["units"]:
+            if u["team"] == "red" and u["alive"]:
+                live += 1
+                if u["id"] in tracks:
+                    seen += 1
+                    error += ((tracks[u["id"]]["x"] - u["x"]) ** 2 + (tracks[u["id"]]["y"] - u["y"]) ** 2) ** 0.5
+    drops = sum(u["drops"] for u in world["units"])
+    return pictures, world, error / max(1, seen), seen / live, drops
+
+
+first, world, err_fused, cover_fused, drops_fused = noisy_run(11)
+again, _, _, _, _ = noisy_run(11)
+other, _, _, _, _ = noisy_run(12)
+check("noisy sensing is reproducible: the same seed gives the same picture every tick", first == again)
+check("a different seed gives a different picture", first != other)
+check("with noise on, tracks report an estimate, an uncertainty and a position inside the map",
+      world["noise"] == 1 and len(world["tracks"]) >= 1
+      and all(t["err"] > 0 and 0 <= t["x"] < 12 and 0 <= t["y"] < 12 and 0 <= t["z"] <= 5 for t in world["tracks"]))
+check("the picture is wrong sometimes but stays within a couple of cells on average", 0 < err_fused < 2)
+_, _, err_raw, cover_raw, drops_raw = noisy_run(11, fusion="off")
+check("the tracker holds more contact-ticks and loses fewer tracks than the best single detection",
+      cover_fused > cover_raw and drops_fused < drops_raw)
+check("the tracker's positions are closer to the truth than raw detections", err_fused < err_raw)
+obs = sim("observe")[1]["observation"]
+check("the planner's observation lists only contacts that have a track", len(obs["contacts"]) == len(sim("status")[1]["world"]["tracks"]))
+code, out = sim("reset", "--scenario", "skirmish")
+check("a reset keeps the sensing setting", out["world"]["noise"] == 1 and out["world"]["fusion"] == 0)
+code, out = sim("sensing", "--noise", "0", "--fusion", "on")
+check("noise 0 restores the perfect picture", out["world"]["noise"] == 0 and len(out["world"]["tracks"]) == 7
+      and all(t["err"] == 0 for t in out["world"]["tracks"]))
+sim("reset")
+
 print()
 if failures:
     print("%d check(s) FAILED" % len(failures))

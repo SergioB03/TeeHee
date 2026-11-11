@@ -51,6 +51,15 @@ struct Unit {
   double a0 = -1, a1 = -1, a2 = -1, a3 = -1;  // altitude: now, 1, 2 and 3 ticks ago; -1 = unknown
   int stopTicks = 0;                          // consecutive ticks without moving
   bool moved = false;                         // has it ever moved
+  // The track blue's sensors hold on this unit, used when sensing noise is on.
+  // Blue then works from the reported position (ox, oy, oz), not the true one.
+  bool tracked = false;
+  int trkTick = -1;                           // tick the track was last stepped on
+  int misses = 0;                             // ticks in a row with no detection
+  int drops = 0;                              // times the track has been lost
+  int ox = 0, oy = 0, oz = 0;                 // reported position now
+  int opx = 0, opy = 0, opz = 0;              // reported position one tick ago
+  std::vector<double> trk;                    // filter state: per axis position, velocity, and 3 covariance terms
   // Sequence model memory: the GRU hidden state after the last tick it saw.
   std::vector<double> seqHidden;
   int seqTick = -1;                           // tick the hidden state was last advanced on; -1 = never
@@ -69,6 +78,9 @@ struct Track {
   int vz = 0;
   double snr = 1.0;
   bool locked = true;  // track is good enough for point defense to shoot at
+  double ex = 0, ey = 0, ez = 0;  // tracker's estimate before rounding (equals x, y, z with perfect sensing)
+  double err = 0;                 // one-sigma position uncertainty, in cells
+  int misses = 0;                 // ticks it has coasted without a detection
   ThreatScore threat;
 };
 
@@ -108,6 +120,15 @@ struct World {
   std::vector<SimEvent> events;
   std::vector<int> cover; // width*height, 0/1
 
+  // Sensing. noise = 0 is the original perfect picture: every contact tracked
+  // at its true position. Above 0, each sensor detects a contact only some of
+  // the time and reports a noisy position; blue then sees what its tracker
+  // makes of that. fusion = false is the comparison case with no tracker:
+  // the single best detection of the tick, and nothing when there is none.
+  double noise = 0;
+  int seed = 0;
+  bool fusion = true;
+
   // Which scorer fills threatScore/threatLabel. Process-wide so it applies to
   // worlds scored while loading; set from `--scorer` before any world exists.
   static ScorerKind activeScorer;
@@ -141,6 +162,12 @@ struct World {
   // Track quality blue's sensors get on this unit: slant range, radar
   // signature, terrain masking at low level, and jamming.
   double observedSnr(const Unit& u) const;
+  double sensorSnr(const Unit& sensor, const Unit& u) const;
+  // Advance the track on one red unit by one tick: detections, then the filter.
+  void stepTrack(Unit& u);
+  // The unit as blue currently believes it to be (reported position), or as it is with perfect sensing.
+  Unit observedView(const Unit& u) const;
+  bool sensing() const { return noise > 0; }
   // True if a cover cell lies on the straight line between two cells.
   bool coverBetween(int x1, int y1, int x2, int y2) const;
 

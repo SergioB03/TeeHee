@@ -30,10 +30,14 @@ p = argparse.ArgumentParser()
 p.add_argument("--scenarios", type=int, default=600, help="rollouts (seeds 0..N-1); the last fifth is validation")
 p.add_argument("--hidden", type=int, default=16, help="hidden units")
 p.add_argument("--seed", type=int, default=0, help="weight initialization seed")
+p.add_argument("--noise-mix", action="store_true",
+               help="experiment: train on tracker output at mixed sensing noise (0, 0.35, 0.7, 1) and write "
+                    "ml/model_noise_mix.json only. The shipped weights are left alone.")
 args = p.parse_args()
 
 t0 = time.time()
-all_rows = simlab.dataset(range(args.scenarios))
+NOISE_LEVELS = (0.0, 0.35, 0.7, 1.0)
+all_rows = simlab.dataset(range(args.scenarios), noise_for=(lambda s: NOISE_LEVELS[s % 4]) if args.noise_mix else None)
 first_val_seed = args.scenarios - args.scenarios // 5
 rows = [r for r in all_rows if r["seed"] < first_val_seed]
 val = [r for r in all_rows if r["seed"] >= first_val_seed]
@@ -75,9 +79,14 @@ model.update({
                  "positive_rate": float(y.mean()), "hidden": args.hidden, "seed": args.seed,
                  "epochs": int(net.n_iter_), "log_loss": float(net.loss_)},
 })
-with open(os.path.join(simlab.HERE, "model.json"), "w") as f:
+if args.noise_mix:
+    model["training"]["noise_levels"] = list(NOISE_LEVELS)
+with open(os.path.join(simlab.HERE, "model_noise_mix.json" if args.noise_mix else "model.json"), "w") as f:
     json.dump(model, f, indent=1)
     f.write("\n")
+if args.noise_mix:
+    print("wrote ml/model_noise_mix.json (experiment only; edge-sim still uses the shipped weights)")
+    raise SystemExit(0)
 
 
 def row(values):
