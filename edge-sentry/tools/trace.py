@@ -26,6 +26,7 @@ RUN = {
     "ml/tracking_eval.py": "npm run eval:tracking",
     "sil/run_sil.py": "npm run sil",
     "ros2/check_bridge.py": "python3 ros2/check_bridge.py (CI job ros2)",
+    "web/test_sessions.py": "npm run test:web",
 }
 
 problems = []

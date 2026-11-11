@@ -230,6 +230,14 @@ check("red opponent never orders blue units", all(i.startswith("R-") for i in or
 log = decisions(500)
 check("each opponent order is logged with actor 'opponent' and a reason",
       len(log) == before + len(out["orders"]) and all(d["actor"] == "opponent" and d["reason"] for d in log[before:]))
+# A player who hands their own side to the computer is not their own opponent: the console passes --actor autopilot.
+sim("reset", "--scenario", "skirmish")
+before = len(decisions(500))
+code, out = sim("opponent", "--side", "red", "--actor", "autopilot")
+log = decisions(500)
+check("red's doctrine flown as the player's own autopilot is logged as actor 'autopilot'",
+      code == 0 and len(out["orders"]) >= 3 and len(log) == before + len(out["orders"])
+      and all(d["actor"] == "autopilot" and d["args"]["id"].startswith("R-") and d["reason"] for d in log[before:]))
 # Blue's computer opponent, against the original red script so that red commits at once.
 sim("reset", "--scenario", "skirmish")
 sim("opponent", "--side", "red", "--doctrine", "basic", "--no-log")

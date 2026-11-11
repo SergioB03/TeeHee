@@ -191,9 +191,12 @@ async function gameTick(session, game, n) {
     const plan = await runSim(session.world, "opponent", ["opponent", "--side", other]);
     if (!plan.ok) return plan;
     for (const o of plan.orders ?? []) opponentOrders.push({ ...o, tick: plan.world.tick });
-    if (game.side === "blue" && game.autopilot) {
-      // The player has handed blue to the autonomy planner for this tick.
-      const auto = await runSim(session.world, "autopilot", ["autopilot"]);
+    if (game.autopilot) {
+      // The player has handed their own side to the computer for this tick:
+      // blue to the autonomy planner, red to the coordinated strike doctrine.
+      const auto = game.side === "blue"
+        ? await runSim(session.world, "autopilot", ["autopilot"])
+        : await runSim(session.world, "autopilot", ["opponent", "--side", "red"]);
       if (!auto.ok) return auto;
       for (const o of auto.orders ?? []) autopilotOrders.push({ ...o, tick: auto.world.tick });
     }
@@ -288,7 +291,6 @@ async function handleApi(req, res, route) {
 
   if (route === "/api/game/autopilot") {
     if (!game) return bad(res, "Start a game first");
-    if (game.side !== "blue") return bad(res, "Autopilot flies blue; you are commanding red");
     if (typeof body.on !== "boolean") return bad(res, "on must be true or false");
     game.autopilot = body.on;
     await saveGame(session, game);
@@ -321,7 +323,8 @@ async function handleApi(req, res, route) {
     let last = null;
     for (let i = 0; i < n; i++) {
       if (auto.red) {
-        const plan = await runSim(session.world, "opponent", ["opponent", "--side", "red"]);
+        // In the sandbox nobody is anybody's opponent: both computers are logged as autopilots.
+        const plan = await runSim(session.world, "autopilot", ["opponent", "--side", "red"]);
         if (!plan.ok) return send(res, 200, plan);
         for (const o of plan.orders ?? []) opponentOrders.push({ ...o, tick: plan.world.tick });
       }

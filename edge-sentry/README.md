@@ -76,7 +76,7 @@ Both were tuned on separate battles and then measured on these, and neither chan
 
 **ROS 2.** The same observation and plan are also typed ROS 2 messages ([`ros2/`](ros2/README.md)): the simulator and the planner run as two separate nodes that talk over topics. CI builds both packages in the official ROS 2 Jazzy container, runs the two nodes, and checks from a third node that every plan on the topic is exactly what the planner gives for that observation and that the orders take effect.
 
-**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 35 requirements (rules of engagement, interface, sensing, model, simulator) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
+**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 38 requirements (rules of engagement, interface, sensing, model, simulator, web console) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
 
 **Noisy sensors.** Everything above uses a perfect picture. With sensing noise on (`edge-sim sensing --noise 0.7`), each sensor detects a contact only some of the time and reports a position that is a little off, worse at range, at low signature, behind cover and under jamming. A per-contact Kalman filter fuses the sensors' reports, rides through gaps of up to three ticks, then drops the track. The threat model and the planner see only that picture. Over 100 rollouts under heavy noise:
 
@@ -143,10 +143,10 @@ Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend ord
 
 - As blue, red's missiles, bomber, jet, stealth fighter, drone and jammer come at you. You run the one point defense by hand and fly a stealth fighter that can shoot aircraft down.
 - As red, you attack and the autonomy planner runs blue's defense and its fighter, working from the trained threat model's scores.
-- In the free sandbox (no game), **Red AI** is on by default so the scenario plays out as you advance time, and **Blue autopilot** can be switched on to watch both computers fight. Turn Red AI off to order red units yourself.
-- As blue you can also switch **Autopilot** on and watch the planner run the defense; each order and its reason goes in the decision log.
+- On either side you can switch **Autopilot** on and the computer flies your side as well: the autonomy planner for blue, the coordinated strike for red. Switch it off and your units do nothing until you order them.
+- In the free sandbox (no game), **Red autopilot** is on by default so the scenario plays out as you advance time, and **Blue autopilot** can be switched on to watch both computers fight. Turn Red autopilot off to order red units yourself.
 
-The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side, the opponent's orders go into the decision log as actor `opponent`, and each visitor gets a separate world, so two people on the hosted demo do not disturb each other.
+The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side. The opponent's orders go into the decision log as actor `opponent` and your own side's autopilot as `autopilot`, each with its reason. Each visitor gets a separate world, game and autopilot switches, so people on the hosted demo do not disturb each other; a test runs twelve visitors at once to check that.
 
 Agent playground:
 
@@ -160,7 +160,8 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 121 CLI checks and 39 planner checks
+npm test               # 122 CLI checks and 39 planner checks
+npm run test:web       # twelve visitors at once on the web console: both sides, autopilot on and off
 npm run trace          # every requirement still names a check that exists
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
@@ -184,6 +185,7 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 - The GRU runs in plain C++ with no ML runtime: weights are compiled in, and each contact's hidden state is saved in the world file and advanced exactly once per tick, however many times the world is read in between.
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
+- Because the simulator is deterministic, visitors who do the same thing must get exactly the same result. `web/test_sessions.py` uses that: it runs twelve visitors in parallel on different sides and fails if any two that should match differ, which is how it would catch one visitor's game leaking into another's.
 - Sensor noise is drawn from a hash of the seed, tick, contact and sensor rather than a running generator, so a noisy run replays exactly and does not depend on how many times the world was read. With noise at 0 the tracker is skipped entirely and every earlier result is unchanged.
 - The planner keeps nothing between ticks. Everything it needs is in the observation, so the in-simulator copy and the edge node cannot drift apart, and a node that restarts is correct again on the next message. The observation never contains a contact's orders or target; the only hint of intent is which blue unit it has just hit, which blue can see for itself. Tests check both.
 - The planner's rules are pinned by 39 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off, goes home, or stays in the fight when damaged.

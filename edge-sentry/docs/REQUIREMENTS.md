@@ -79,9 +79,17 @@ Each requirement names the automated checks that verify it. CI runs `tools/trace
 | RED-01 | Red orders only red units, and its coordinated strike arrives together and low. | red opponent never orders blue units (`native/tests/test_cli.py`)<br>under the coordinated doctrine at least three attackers land their first hit within three ticks of each other (`native/tests/test_cli.py`)<br>jets and drones come in at level 1 (`native/tests/test_cli.py`) | `npm test` |
 | RED-02 | The coordinated doctrine was harder on the planner than the original script before the planner was taught to answer it, and the planner still beats no defense against it. | the coordinated doctrine hurt the planner more than the original script before it was taught (`ml/opponent_eval.py`)<br>the planner still beats no defense against the coordinated doctrine (`ml/opponent_eval.py`) | `npm run eval:opponent` |
 
+## Web console
+
+| ID | Requirement | Verified by | Run with |
+| --- | --- | --- | --- |
+| WEB-01 | Autopilot is offered for whichever side the player commands. It orders only that side, and the computer keeps flying the other. | autopilot can be switched on when commanding red (`web/test_sessions.py`)<br>autopilot can be switched on when commanding blue (`web/test_sessions.py`)<br>red autopilot orders red units, and only red units (`web/test_sessions.py`)<br>blue autopilot orders blue units, and only blue units (`web/test_sessions.py`)<br>with red on autopilot the computer still flies blue against it (`web/test_sessions.py`) | `npm run test:web` |
+| WEB-02 | With autopilot off a side does nothing until the player orders it, a player can order only their own side, and a game stops at tick 20. | with autopilot off, red does nothing until the player orders it (`web/test_sessions.py`)<br>a red player still cannot order blue's units (`web/test_sessions.py`)<br>a red game played by hand runs to tick 20 and then refuses to go on (`web/test_sessions.py`) | `npm run test:web` |
+| WEB-03 | Every visitor has a separate world, game, clock and autopilot switches. Visitors doing the same thing at the same time get exactly the same result, and parallel requests in one session are applied one after another. | visitors doing the same thing at the same time end with exactly the same result (`web/test_sessions.py`)<br>sandbox switches changed by some visitors did not change anyone else's (`web/test_sessions.py`)<br>a client that sends no session id is untouched by all of them (`web/test_sessions.py`)<br>eight ticks sent at once in one session all count, exactly once each (`web/test_sessions.py`) | `npm run test:web` |
+
 ## Coverage
 
-35 requirements, 89 links to checks.
+38 requirements, 101 links to checks.
 
-- `native/tests/test_cli.py`: 47 of 121 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.
+- `native/tests/test_cli.py`: 47 of 122 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.
 - `native/tests/test_planner.py`: 18 of 39 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.

@@ -38,6 +38,8 @@ jobs:
         run: npm run eval:tracking
       - name: Software-in-the-loop (simulator plus a separate edge-node over TCP)
         run: npm run sil
+      - name: Web console with twelve visitors at once (both sides, autopilot on and off, sandbox)
+        run: npm run test:web
       - name: Web console smoke test
         run: |
           PORT=3100 node web/server.mjs &
@@ -65,6 +67,9 @@ jobs:
           curl -sf -X POST -H "$J" -H "$S" -d '{"side":"blue"}' $B/api/game/start | grep -q '"autopilot":false'
           curl -sf -X POST -H "$J" -H "$S" -d '{"on":true}' $B/api/game/autopilot | grep -q '"autopilot":true'
           curl -sf -X POST -H "$J" -H "$S" -d '{"n":5}' $B/api/tick | grep -q '"autopilotOrders":\[{'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"side":"red"}' $B/api/game/start | grep -q '"autopilot":false'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"on":true}' $B/api/game/autopilot | grep -q '"autopilot":true'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"n":5}' $B/api/tick | grep -q '"autopilotOrders":\[{"id":"R-'
 
   arm64:
     name: Edge node on arm64 (emulated)

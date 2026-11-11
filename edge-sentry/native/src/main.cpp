@@ -307,9 +307,12 @@ int main(int argc, char** argv) {
       err = "bad --variant (expected full, nolead, notimed, nopatrol, freefire, nodefense, gohome, untaught, closein or commit)";
     } else {
       // Each order is logged on its own line, as actor "opponent" or
-      // "autopilot", against the picture the plan was made on.
+      // "autopilot", against the picture the plan was made on. The doctrine
+      // flown through `opponent` is logged as "autopilot" when the caller says
+      // so (--actor autopilot): a player who hands their own side to the
+      // computer is not their own opponent.
       const std::string picture = pictureJson(world);
-      const std::string who = autopilot ? "autopilot" : "opponent";
+      const std::string who = (autopilot || actor == "autopilot") ? "autopilot" : "opponent";
       std::vector<OpponentMove> plan;
       if (autopilot) {
         // Through the same JSON message an edge node receives, so the two

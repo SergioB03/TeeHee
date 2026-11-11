@@ -599,5 +599,74 @@
         "the planner still beats no defense against the coordinated doctrine"
       ]
     ]
+  },
+  {
+    "id": "WEB-01",
+    "area": "Web console",
+    "text": "Autopilot is offered for whichever side the player commands. It orders only that side, and the computer keeps flying the other.",
+    "tests": [
+      [
+        "web/test_sessions.py",
+        "autopilot can be switched on when commanding red"
+      ],
+      [
+        "web/test_sessions.py",
+        "autopilot can be switched on when commanding blue"
+      ],
+      [
+        "web/test_sessions.py",
+        "red autopilot orders red units, and only red units"
+      ],
+      [
+        "web/test_sessions.py",
+        "blue autopilot orders blue units, and only blue units"
+      ],
+      [
+        "web/test_sessions.py",
+        "with red on autopilot the computer still flies blue against it"
+      ]
+    ]
+  },
+  {
+    "id": "WEB-02",
+    "area": "Web console",
+    "text": "With autopilot off a side does nothing until the player orders it, a player can order only their own side, and a game stops at tick 20.",
+    "tests": [
+      [
+        "web/test_sessions.py",
+        "with autopilot off, red does nothing until the player orders it"
+      ],
+      [
+        "web/test_sessions.py",
+        "a red player still cannot order blue's units"
+      ],
+      [
+        "web/test_sessions.py",
+        "a red game played by hand runs to tick 20 and then refuses to go on"
+      ]
+    ]
+  },
+  {
+    "id": "WEB-03",
+    "area": "Web console",
+    "text": "Every visitor has a separate world, game, clock and autopilot switches. Visitors doing the same thing at the same time get exactly the same result, and parallel requests in one session are applied one after another.",
+    "tests": [
+      [
+        "web/test_sessions.py",
+        "visitors doing the same thing at the same time end with exactly the same result"
+      ],
+      [
+        "web/test_sessions.py",
+        "sandbox switches changed by some visitors did not change anyone else's"
+      ],
+      [
+        "web/test_sessions.py",
+        "a client that sends no session id is untouched by all of them"
+      ],
+      [
+        "web/test_sessions.py",
+        "eight ticks sent at once in one session all count, exactly once each"
+      ]
+    ]
   }
 ]
