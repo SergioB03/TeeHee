@@ -2,9 +2,9 @@
 
 A small 3D air and electronic-warfare sandbox with trained threat models, an autonomy planner that runs on a separate edge node, an LLM ops agent, and a console for phone and desktop.
 
-**Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (phone or desktop; every visitor gets a private sandbox)
+**Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (phone or desktop; every visitor gets a private sandbox). It opens in the Basic view; [edge-sentry.replit.app/?level=advanced](https://edge-sentry.replit.app/?level=advanced) opens the full console.
 
-<img src="docs/demo.gif" alt="Phone console, 3D view: blue's autopilot runs the defense, giving a reason for each order, while red's strike comes in at different altitudes" width="320">
+<img src="docs/demo.gif" alt="Phone console, Basic view: the computer plays both sides of a 20-round battle. Each round is told in a sentence under the 3D map and flagged where it happened, and the result is given at the end" width="320">
 
 Blue sensors watch red contacts on a 12×12 map with six altitude levels. Jets, stealth fighters, bombers, drones and missiles each fly differently: speed, climb rate, ceiling, how visible they are to sensors, and how low they must come to hit. Low flyers hide behind terrain, and point defense needs a usable track to stop anything. The question the project answers each tick: **which contacts are about to hurt us, and which one do we deal with first?** A C++ simulator produces the world, a small neural network trained on simulator rollouts scores every contact, and an agent (or you, from your phone) reads the picture and issues orders. Every order is written to a decision log with the threat picture it was made on.
 
@@ -125,7 +125,7 @@ Full tables and method: [`ml/RESULTS.md`](ml/RESULTS.md), [`ml/OUTCOMES.md`](ml/
 
 **Docker.** `docker compose up` runs the console and the planner with nothing installed but Docker ([`docker/`](docker/README.md)). The planner's image is a single 2 MB statically linked file on an empty base, and it builds for arm64 without emulating a compiler. `docker compose run --rm sil` repeats the software-in-the-loop test with a real boundary: the simulator in one container, the planner in another held to half a CPU core and 32 MB, talking only over the network. Every container runs as a non-root user on a read-only filesystem with no Linux capabilities, and CI checks that from outside, down to what the kernel reports.
 
-**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 47 requirements (rules of engagement, interface, sensing, model, simulator, web console, containers, learned policy) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
+**Requirements.** [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) lists 50 requirements (rules of engagement, interface, sensing, model, simulator, web console, containers, learned policy) and the automated checks that verify each one. CI fails if a named check is renamed or removed, or a requirement is left without one.
 
 ## How it fits together
 
@@ -168,7 +168,16 @@ Console for phone and desktop, no model login and no `npm install`:
 npm run web          # builds edge-sim if needed, serves http://localhost:3100
 ```
 
-Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend order with an optional reason, and advance ticks. The 3D view (the default) draws every aircraft as a figure at its altitude with a shadow below it, nose up or down as it climbs or dives, banked while it orbits, and missiles leave a bright trail; drag sideways to turn it, or switch to the flat map. On a wide screen the map fills the left side and stays in view while contacts, orders and logs sit in a panel on the right (Space advances a tick, the arrow keys turn the view). The decision log at the bottom of the page shows each order with the threat picture at that moment. On Replit, import the repo and press Run; the root `.replit` file runs the same script.
+**Basic and Advanced.** The console has two levels, switched at the top of the page, and it opens in Basic.
+
+- **Basic** is for someone seeing this for the first time. *Watch a battle* hands both sides to the computer and plays the 20 rounds on its own; *Defend as blue* and *Attack as red* let you play with one or two taps (tap a red aircraft, then *Send fighter* or *Aim shield*). Units are named in words (base, radar, bomber), each round is told in a sentence or two under the map and flagged on the map where it happened, and tapping anything says what it is and what it is doing. At the end you get the score in a sentence and, once you have watched the computer play, its score to beat.
+- **Advanced** is the full console described in the rest of this section, on the same battle: every order with its reason, the threat scores, the logs, the sensor settings and the free sandbox.
+
+Your choice is remembered, and `?level=advanced` or `?level=basic` in the address opens either one directly.
+
+<img src="docs/demo-advanced.gif" alt="Phone console, Advanced view: blue's autopilot runs the defense, giving a reason for each order, while red's strike comes in at different altitudes" width="320">
+
+In Advanced, tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend order with an optional reason, and advance ticks. The 3D view (the default) draws every aircraft as a figure at its altitude with a shadow below it, nose up or down as it climbs or dives, banked while it orbits, and missiles leave a bright trail; drag sideways to turn it, or switch to the flat map. On a wide screen the map fills the left side and stays in view while contacts, orders and logs sit in a panel on the right (Space advances a tick, the arrow keys turn the view). The decision log at the bottom of the page shows each order with the threat picture at that moment. On Replit, import the repo and press Run; the root `.replit` file runs the same script.
 
 **Play a side.** Press *Play as blue* or *Play as red* for a 20-tick game against the computer:
 
@@ -200,7 +209,8 @@ Tests and model evaluation (Python standard library only):
 
 ```bash
 npm test               # 132 CLI checks and 47 planner checks
-npm run test:web       # twelve visitors at once on the web console: both sides, autopilot on and off
+npm run test:web       # twelve visitors at once on the web console, then the Basic view: its sentences against
+                       # real battles and the C++ tables, and both levels of the real page in headless Chrome
 npm run trace          # every requirement still names a check that exists
 npm run docs:check     # the numbers quoted in the READMEs still match the generated reports
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
@@ -228,6 +238,7 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
 - Because the simulator is deterministic, visitors who do the same thing must get exactly the same result. `web/test_sessions.py` uses that: it runs twelve visitors in parallel on different sides and fails if any two that should match differ, which is how it would catch one visitor's game leaking into another's.
+- Everything the Basic view says comes from one block of `web/index.html` with no page and no network in it. `web/test_basic.mjs` lifts that block out and runs it on three real battles and against the simulator's own C++ tables, so a sentence cannot name a unit by its id, miss a hit, or claim something about an aircraft that its numbers do not support. The same file then opens the real page in headless Chrome over Chrome's debugging socket, with no test framework to install, and checks both levels and the switch between them. Basic is a second way of showing the same game: it adds no server code and no rules of its own.
 - Sensor noise is drawn from a hash of the seed, tick, contact and sensor rather than a running generator, so a noisy run replays exactly and does not depend on how many times the world was read. With noise at 0 the tracker is skipped entirely and every earlier result is unchanged.
 - The planner node is one thread that watches every connection with `poll()`, so a health probe or a second client is answered while another stays connected, and it stops at once on a stop request because there is nothing to save.
 - `edge-sim serve` keeps the world in memory and takes one command per line, the same commands as the command line. A training loop gets about 5,000 simulated ticks a second from two CPU cores that way, against a few dozen when every command is a new process. A test plays the same games both ways and compares them.

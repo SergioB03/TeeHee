@@ -27,6 +27,7 @@ RUN = {
     "sil/run_sil.py": "npm run sil",
     "ros2/check_bridge.py": "python3 ros2/check_bridge.py (CI job ros2)",
     "web/test_sessions.py": "npm run test:web",
+    "web/test_basic.mjs": "npm run test:web",
     "docker/check.py": "python3 docker/check.py (CI jobs docker and ros2)",
     "ml/test_rl.py": "npm run test:rl",
     "ml/rl_eval.py": "npm run eval:rl",
