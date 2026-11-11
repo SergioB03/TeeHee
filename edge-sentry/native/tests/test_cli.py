@@ -233,8 +233,9 @@ for _ in range(20):
             blocked += e["kind"] == "blocked"
             kills += e["kind"] == "destroyed" and e["detail"].startswith("R-")
 check("blue opponent only orders its own HQ and fighter", {o["id"] for o in blue_orders} == {"B-HQ", "B-F1"})
-check("blue's fighter is only sent after aircraft", all(o["target"] in ("R-JET1", "R-F1", "R-BMR1", "R-DRN1", "R-MSL1", "R-MSL2")
-                                                       for o in blue_orders if o["id"] == "B-F1"))
+check("blue's fighter only attacks aircraft, and otherwise moves or orbits",
+      all(o["target"] in ("R-JET1", "R-F1", "R-BMR1", "R-DRN1", "R-MSL1", "R-MSL2") if o["action"] == "launch"
+          else o["action"] in ("move", "orbit", "cease") for o in blue_orders if o["id"] == "B-F1"))
 check("blue's model blocks at least one strike in the skirmish", blocked >= 1)
 check("blue's fighter shoots down at least one red aircraft in the skirmish", kills >= 1)
 sim("reset")
@@ -374,6 +375,36 @@ json.dump(old, open(WORLD, "w"))
 code, out = sim("status")
 check("a world saved before altitude existed loads with aircraft at cruise level",
       code == 0 and unit(out["world"], "R-BMR1")["z"] == 4 and unit(out["world"], "B-HQ")["z"] == 0)
+sim("reset")
+
+# --- autonomy: observation message and the autopilot command ----------------------
+sim("reset", "--scenario", "skirmish")
+sim("opponent", "--side", "red", "--no-log")
+sim("tick", "--n", "2")
+code, out = sim("observe")
+obs = out["observation"]
+check("observe lists blue's own units and its contacts", code == 0 and obs["v"] == 1 and len(obs["own"]) == 5 and len(obs["contacts"]) == 7)
+check("an observed contact carries only what blue can measure",
+      all(set(c) == {"id", "cls", "x", "y", "z", "vx", "vy", "vz", "snr", "locked", "score", "jam"} for c in obs["contacts"]))
+check("the observation never names what a contact is attacking",
+      not any(blue_id in json.dumps(obs["contacts"]) for blue_id in ("B-HQ", "B-S1", "B-S2", "B-R1", "B-F1")))
+before = len(decisions(500))
+code, out = sim("autopilot", "--dry-run")
+plan = out["orders"]
+check("autopilot --dry-run plans without giving orders or logging",
+      code == 0 and len(plan) >= 1 and unit(out["world"], "B-HQ")["order"]["action"] == "none" and len(decisions(500)) == before)
+code, out = sim("autopilot")
+check("autopilot gives the same orders it planned",
+      [(o["id"], o["action"], o["target"]) for o in out["orders"]] == [(o["id"], o["action"], o["target"]) for o in plan]
+      and all(o["ok"] for o in out["orders"]))
+log = decisions(500)[before:]
+check("autopilot orders are logged as actor 'autopilot' with the behavior and a reason",
+      len(log) == len(plan) and all(d["actor"] == "autopilot" and d["reason"].split(":")[0] in
+                                    ("DEFEND", "HOLD", "PATROL", "SHADOW", "INTERCEPT", "ENGAGE", "RTB") for d in log))
+check("autopilot only orders blue units", all(o["id"].startswith("B-") for o in out["orders"]))
+code, out = sim("autopilot", "--dry-run")
+check("with nothing changed, the planner gives no repeat orders", out["orders"] == [])
+rejected("autopilot rejects an unknown variant", "autopilot", "--variant", "reckless", contains="--variant")
 sim("reset")
 
 print()

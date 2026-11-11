@@ -28,6 +28,10 @@ jobs:
         run: git diff --exit-code -- ml/RESULTS.md
       - name: Outcome evaluation (triage policies, quick version)
         run: npm run eval:outcome
+      - name: Autonomy planner evaluation (quick version)
+        run: npm run eval:autonomy
+      - name: Software-in-the-loop (simulator plus a separate edge-node over TCP)
+        run: npm run sil
       - name: Web console smoke test
         run: |
           PORT=3100 node web/server.mjs &
@@ -46,6 +50,29 @@ jobs:
           curl -sf -X POST -H "$J" -H "$S" -d '{"n":20}' $B/api/tick | grep -q '"over":true'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$J" -H "$S" -d '{"n":1}' $B/api/tick)" = 400
           curl -sf $B/api/state | grep -q '"game":null'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"side":"blue"}' $B/api/game/start | grep -q '"autopilot":false'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"on":true}' $B/api/game/autopilot | grep -q '"autopilot":true'
+          curl -sf -X POST -H "$J" -H "$S" -d '{"n":5}' $B/api/tick | grep -q '"autopilotOrders":\[{'
+
+  arm64:
+    name: Edge node on arm64 (emulated)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the arm64 cross compiler and emulator
+        run: sudo apt-get update && sudo apt-get install -y g++-aarch64-linux-gnu qemu-user-static
+      - name: Build edge-sim for this machine
+        run: npm run build:native
+      - name: Cross-compile edge-node for arm64 (the Raspberry Pi and Jetson architecture)
+        run: |
+          aarch64-linux-gnu-g++ -std=c++17 -O2 -static -Inative/src native/node/edge_node.cpp native/src/autonomy.cpp -o /tmp/edge-node-arm64
+          file /tmp/edge-node-arm64 | grep -q "ARM aarch64"
+          printf '#!/bin/sh\nexec qemu-aarch64-static /tmp/edge-node-arm64 "$@"\n' > /tmp/edge-node-arm64.sh
+          chmod +x /tmp/edge-node-arm64.sh
+      - name: Planner tests against the arm64 build
+        run: python3 native/tests/test_planner.py /tmp/edge-node-arm64.sh
+      - name: Software-in-the-loop with the arm64 node
+        run: python3 sil/run_sil.py --rollouts 8 --budget-ms 250 --node-bin /tmp/edge-node-arm64.sh --label "an arm64 build under QEMU emulation" --check --no-write
 
   typecheck:
     name: TypeScript and agent project

@@ -1,6 +1,6 @@
 # edge-sentry
 
-A small 3D air and electronic-warfare sandbox with trained threat models, an LLM ops agent, and a phone console.
+A small 3D air and electronic-warfare sandbox with trained threat models, an autonomy planner that runs on a separate edge node, an LLM ops agent, and a console for phone and desktop.
 
 **Live demo:** [edge-sentry.replit.app](https://edge-sentry.replit.app) (best on a phone; the sandbox is shared, so press Reset scenario to start clean)
 
@@ -35,6 +35,29 @@ Simulation and wargame math only. No real RF jammer designs, seeker guidance, or
 
 Mission value is the average over every tick and blue asset of health × integrity. The learned model recovers 70% of the gain that lookahead gets over doing nothing, and the sequence model 74%.
 
+**Autonomy.** A planner (`native/src/autonomy.cpp`) runs blue's whole defense from the observation message alone: which contact point defense covers each tick, and how the fighter flies (patrol, shadow, intercept, engage, return to base). It estimates the loss each contact will cause at each coming tick, gives point defense to whatever can do the most damage next, and sends the fighter after the contact whose removal saves the most. Over 150 rollouts where blue has point defense and one fighter:
+
+| Who runs the defense | Mission value | Hits taken | Aircraft shot down that never attacked |
+| --- | --- | --- | --- |
+| Nobody | 0.889 | 4.06 | 0 |
+| Point defense by score x damage, fighter idle | 0.949 | 2.20 | 0 |
+| Same, fighter takes the next most dangerous aircraft | 0.962 | 1.23 | 0.34 |
+| Same, fighter chases the nearest aircraft | 0.968 | 0.89 | 1.12 |
+| **Autonomy planner** | **0.974** | **0.83** | **0.11** |
+
+The last column matters because the simulator does not punish shooting an aircraft that was only passing through, so a fighter that shoots at everything scores well. The planner holds fire on any contact the threat model has not flagged and follows it instead; that rule costs 0.003 of mission value and cuts those shoot-downs from 0.66 to 0.11 per rollout. Timing point defense is the part that pays (+0.009). Two things I expected to help did not measurably: flying to where a target will be instead of straight at it, and waiting at a forward patrol station. Both are left on and reported in [`ml/AUTONOMY.md`](ml/AUTONOMY.md).
+
+**On a separate computer.** The same planner builds as `edge-node`, a standalone program with no simulator in it, and a software-in-the-loop harness runs the simulator against it over TCP ([`sil/`](sil/README.md)):
+
+| Check | Result |
+| --- | --- |
+| Ticks where the node's orders differed from the in-simulator planner | 0 of 880 |
+| Planning time in the node, median and worst | 38 µs and 121 µs |
+| TCP round trip, median and 99th percentile | 0.26 ms and 0.44 ms |
+| Mission value on a direct link, losing 30% of messages, losing 60%, link down | 0.970, 0.964, 0.950, 0.878 |
+
+A reply that misses the 50 ms tick budget is thrown away and units keep their last orders, so a bad link degrades gradually and a dead one is exactly as good as no autonomy (0.878), never worse. Those timings are from the development machine. CI also cross-compiles the node for arm64 and runs the same tests under emulation, which shows the build is right for a Raspberry Pi or Jetson but says nothing about their speed; it has not been timed on a physical device yet.
+
 **Does a recurrent model need the hand-built history?** No. The sequence model is a 16-unit GRU trained with PyTorch that gets only the 20 inputs describing the current tick and has to remember the track itself. It matches the default model on held-out AUC (0.967 vs 0.968), passes the same number of scripted scenarios, and is slightly ahead on outcomes (0.954 vs 0.951 mission value). That is a tie within noise, reached with less feature engineering. The default stays the smaller model; `--scorer sequence` switches to the GRU, and every track reports both scores.
 
 Where it falls short: on aircraft and missiles alone, the heuristic that is allowed to read each contact's real target still ranks slightly better (0.942 vs 0.938 AUC); the models win overall and on every outcome measure. Both models fail the same two scripted scenarios: a jet that parks beside HQ without firing (read as benign; a human would keep watching) and a distant jammer that they call hostile before it has moved. They also need a tick or two of motion before they can read intent. Moving to 3D made the task harder: AUC was 0.978 on the earlier flat simulator.
@@ -54,6 +77,8 @@ flowchart LR
     M --> J[world.json and CLI output]
     J --> A[Ops agent tools<br/>TypeScript, Agent SDK]
     J --> P[Phone console<br/>zero-dependency Node server]
+    J -->|observation message| N[Autonomy planner<br/>inside edge-sim, or edge-node over TCP]
+    N -->|orders + reasons| W
     A -->|orders + reasons| W
     P -->|orders + reasons| W
     W --> D[Decision log<br/>order, actor, reason, picture]
@@ -65,6 +90,9 @@ flowchart LR
 | `native/` | C++ simulator and scorer: units, jam fields, engagements, track features, JSON CLI |
 | `ml/` | Dataset generation, training, prediction and outcome evaluation, scripted scenarios |
 | `bot/` | Agent instructions and five tools (`map_status`, `run_tick`, `issue_order`, `score_tracks`, `decision_log`) |
+| `native/node/` | `edge-node`: the autonomy planner as a standalone TCP program for an edge computer |
+| `sil/` | Software-in-the-loop harness, link emulation and results |
+| `docs/INTERFACE.md` | The message contract between the picture and the autonomy |
 | `web/` | Phone console: `server.mjs`, `index.html`, `run.sh` |
 | `evals/` | Agent evals: tool routing, and an outcome-graded eval that scores the agent's defensive decisions |
 
@@ -81,7 +109,8 @@ Tap a unit, give it a move, climb, dive, orbit, jam, launch, cease or defend ord
 **Play a side.** Press *Play as blue* or *Play as red* for a 20-tick game against the computer:
 
 - As blue, red's missiles, bomber, jet, stealth fighter, drone and jammer come at you. You run the one point defense by hand and fly a stealth fighter that can shoot aircraft down.
-- As red, you attack and the trained threat model runs blue's defense and its fighter, picking the contacts with the highest threat score weighted by how much damage they can do.
+- As red, you attack and the autonomy planner runs blue's defense and its fighter, working from the trained threat model's scores.
+- As blue you can also switch **Autopilot** on and watch the planner run the defense; each order and its reason goes in the decision log.
 
 The score is blue's average mission value over the game, the same measure the outcome evaluation uses. You can only order your own side, the opponent's orders go into the decision log as actor `opponent`, and each visitor gets a separate world, so two people on the hosted demo do not disturb each other.
 
@@ -97,9 +126,11 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 92 CLI regression checks
+npm test               # 101 CLI checks and 27 planner checks
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
+npm run eval:autonomy  # the planner against simpler defense rules (quick version)
+npm run sil            # simulator against a separate edge-node over TCP
 ```
 
 Retraining needs numpy and scikit-learn: `python3 ml/train.py`, then rebuild. The sequence model needs PyTorch: `python3 ml/train_seq.py`, or run the *Train sequence model* workflow, which trains in GitHub Actions and commits the weights.
@@ -116,14 +147,18 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 - The GRU runs in plain C++ with no ML runtime: weights are compiled in, and each contact's hidden state is saved in the world file and advanced exactly once per tick, however many times the world is read in between.
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
+- The planner keeps nothing between ticks. Everything it needs is in the observation, so the in-simulator copy and the edge node cannot drift apart, and a node that restarts is correct again on the next message. The observation never contains a contact's orders or target, and a test checks that.
+- The planner's rules are pinned by 27 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off or goes home.
 - [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) records a code review of the first version: five bugs found, fixed, and covered by regression tests.
 
 ## Roadmap
 
-1. Run the outcome-graded agent eval and compare the agent with the scripted triage policy
-2. More than one defensive resource, so triage becomes an assignment problem
-3. Detection that can lose a track entirely, so stealth and terrain hide contacts instead of only weakening them
-4. Raspberry Pi field node behind the same JSON CLI
+1. Time the edge node on a physical Raspberry Pi or Jetson (`sil/README.md` has the two commands)
+2. A learned policy (reinforcement learning) compared with the planner on the same rollouts
+3. Noisy measurements, lost tracks and a tracker, so the autonomy works from sensor data instead of clean positions
+4. ROS 2 bridge: observations and orders as topics
+5. Requirements table that maps each rule to the test that checks it
+6. Run the outcome-graded agent eval and compare the agent with the planner
 
 ## Safety line
 

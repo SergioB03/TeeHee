@@ -26,6 +26,9 @@ void usage() {
       << "  edge-sim --world <path> decisions [--n N]     last N entries of the decision log (default 20)\n"
       << "  edge-sim --world <path> reset --scenario skirmish   larger setup with no orders, used by play mode\n"
       << "  edge-sim --world <path> opponent --side <red|blue>  let the computer give that side's orders for this tick\n"
+      << "  edge-sim --world <path> observe               the observation message blue's autonomy gets (no red orders or targets)\n"
+      << "  edge-sim --world <path> autopilot [--variant full|nolead|notimed|nopatrol|freefire] [--dry-run]\n"
+      << "                                                run the autonomy planner for blue and give its orders\n"
       << "  edge-sim inputs                               names of the learned model's inputs, in order\n"
       << "Options:\n"
       << "  --scorer <learned|heuristic|sequence>   which threat scorer fills threatScore (default learned)\n"
@@ -72,12 +75,12 @@ struct Args {
 
 bool isCommand(const std::string& a) {
   return a == "status" || a == "reset" || a == "tick" || a == "score" || a == "spawn" || a == "order" ||
-         a == "decisions" || a == "inputs" || a == "opponent";
+         a == "decisions" || a == "inputs" || a == "opponent" || a == "observe" || a == "autopilot";
 }
 
 Args parseArgs(const std::vector<std::string>& raw) {
   static const std::set<std::string> kTakesValue = {
-      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side",
+      "--world", "--scorer", "--actor", "--reason", "--n",      "--type", "--team", "--scenario", "--side", "--variant",
       "--x",     "--y",      "--z",     "--id",     "--action", "--tx",   "--ty",   "--tz",       "--target"};
   Args out;
   for (size_t i = 0; i < raw.size(); ++i) {
@@ -273,36 +276,60 @@ int main(int argc, char** argv) {
     if (scenario.empty() || scenario == "default") world.reset();
     else if (scenario == "skirmish") world = World::skirmishScenario();
     else err = "bad --scenario (expected default or skirmish)";
-  } else if (cmd == "opponent") {
-    Team side = Team::Unknown;
-    if (!teamFromString(argValue(args, "--side"), side) || side == Team::Unknown) {
+  } else if (cmd == "opponent" || cmd == "autopilot") {
+    Team side = Team::Blue;
+    PlannerConfig variant;
+    const bool autopilot = cmd == "autopilot";
+    if (!autopilot && (!teamFromString(argValue(args, "--side"), side) || side == Team::Unknown)) {
       err = "bad --side (expected red or blue)";
+    } else if (autopilot && !plannerConfigFromName(argValue(args, "--variant"), variant)) {
+      err = "bad --variant (expected full, nolead, notimed, nopatrol or freefire)";
     } else {
-      // Each order is logged on its own line, as actor "opponent", against
-      // the picture the plan was made on.
+      // Each order is logged on its own line, as actor "opponent" or
+      // "autopilot", against the picture the plan was made on.
       const std::string picture = pictureJson(world);
+      const std::string who = autopilot ? "autopilot" : "opponent";
+      std::vector<OpponentMove> plan;
+      if (autopilot) {
+        // Through the same JSON message an edge node receives, so the two
+        // cannot decide differently.
+        Observation seen;
+        observationFromJson(observationToJson(world.observe()), seen);
+        for (const auto& p : planDefense(seen, variant)) {
+          OpponentMove m;
+          m.id = p.id;
+          orderFromString(p.action, m.action);
+          m.tx = p.tx; m.ty = p.ty; m.tz = p.tz;
+          m.targetId = p.target;
+          m.reason = p.mode + ": " + p.reason;
+          plan.push_back(m);
+        }
+      } else {
+        plan = world.planOpponent(side);
+      }
+      const bool dryRun = hasFlag(args, "--dry-run");
       std::vector<std::string> issued;
-      for (const auto& m : world.planOpponent(side)) {
+      for (const auto& m : plan) {
         std::string moveErr;
-        world.issueOrder(m.id, m.action, m.tx, m.ty, m.tz, m.targetId, &moveErr);
+        if (!dryRun) world.issueOrder(m.id, m.action, m.tx, m.ty, m.tz, m.targetId, &moveErr);
         std::ostringstream a;
         a << "{\"id\":" << jsonString(m.id) << ",\"action\":" << jsonString(orderToString(m.action));
         if (m.tx >= 0) a << ",\"tx\":\"" << m.tx << "\",\"ty\":\"" << m.ty << "\"";
         if (!m.targetId.empty()) a << ",\"target\":" << jsonString(m.targetId);
         a << "}";
-        if (!hasFlag(args, "--no-log")) {
-          appendDecision(logPath, world.tick, "opponent", "order", a.str(), m.reason, moveErr, picture);
+        if (!hasFlag(args, "--no-log") && !dryRun) {
+          appendDecision(logPath, world.tick, who, "order", a.str(), m.reason, moveErr, picture);
         }
         std::ostringstream o;
         o << "{\"id\":" << jsonString(m.id) << ",\"action\":" << jsonString(orderToString(m.action))
-          << ",\"target\":" << jsonString(m.targetId) << ",\"tx\":" << m.tx << ",\"ty\":" << m.ty
+          << ",\"target\":" << jsonString(m.targetId) << ",\"tx\":" << m.tx << ",\"ty\":" << m.ty << ",\"tz\":" << m.tz
           << ",\"reason\":" << jsonString(m.reason) << ",\"ok\":" << (moveErr.empty() ? "true" : "false") << "}";
         issued.push_back(o.str());
       }
       opponentOrders = "[" + joinComma(issued) + "]";
       world.scoreAllTracks();
     }
-  } else if (cmd == "status") {
+  } else if (cmd == "status" || cmd == "observe") {
     // no-op
   } else if (cmd == "score") {
     world.scoreAllTracks();
@@ -370,7 +397,8 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "{\"ok\":true,\"command\":\"" << cmd << "\"";
-  if (cmd == "opponent") std::cout << ",\"orders\":" << opponentOrders;
+  if (cmd == "opponent" || cmd == "autopilot") std::cout << ",\"orders\":" << opponentOrders;
+  if (cmd == "observe") std::cout << ",\"observation\":" << observationToJson(world.observe());
   std::cout << ",\"world\":" << world.toJson(false) << "}\n";
   return 0;
 }

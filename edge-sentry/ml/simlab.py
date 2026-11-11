@@ -208,6 +208,21 @@ def random_scenario(seed):
     return units, orders
 
 
+def fighter_scenario(seed):
+    """A random rollout in which blue always has exactly one stealth fighter, with no orders."""
+    units, orders = random_scenario(seed)
+    units = [u for u in units if u["id"] != "B-F1"]
+    orders = [(t, a) for t, a in orders if "B-F1" not in a]
+    rng = random.Random(seed * 7919 + 1)
+    taken = {(u["x"], u["y"]) for u in units}
+    while True:
+        cell = (rng.randrange(12), rng.randrange(12))
+        if cell not in taken:
+            break
+    units.append(unit("B-F1", "stealth", "blue", cell[0], cell[1]))
+    return units, orders
+
+
 def rollout(sim, units, orders, ticks=TICKS):
     """Run a scenario. Returns one snapshot per tick: {tick, tracks, hits}.
 
