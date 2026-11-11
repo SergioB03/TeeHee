@@ -80,6 +80,25 @@ A good score only matters if acting on it helps. `outcome.py` gives blue one def
 
 The agent is graded the same way. `evals/outcome.eval.ts` seeds eight scripted scenarios into the agent's workspace, asks it to run the defense for 12 ticks, recomputes mission value from its own `run_tick` results, and compares it with no defense and with the learned-model policy. It also fails the run if the agent orders a red unit or resets the scenario. That eval needs a model login and has not been run yet.
 
+## Learned policy (reinforcement learning)
+
+The planner's rules were written by hand. `rl_train.py` asks whether the same behavior can be learned: a small network, trained with PPO, chooses each tick which contact point defense covers and which aircraft the fighter goes after.
+
+- **What it sees.** The planner's observation message and nothing else (`rl_env.py` turns it into 27 numbers per contact and 13 about blue's own side). The network treats the contacts as a set, so their number and order do not matter.
+- **What it is rewarded for.** Blue's mission value after each tick, the measure every evaluation here reports. Nothing else: no bonus for kills, no penalty written in for shooting the wrong aircraft.
+- **Rules of engagement.** A mask, not a penalty. A shot at a contact below the watch line is not among the choices unless that contact has hit one of blue's aircraft, so the rule holds from the first random step of training to the last. `--roe free` removes the mask to measure what the rule costs.
+- **What it trains on.** Fresh games every rollout, 70% scripted rollouts and 30% battles against red's coordinated doctrine, from seeds no evaluation uses. The simulator runs in `edge-sim serve` processes, one per CPU thread.
+- **How it is judged.** `rl_eval.py` plays it on the planner evaluation's 150 rollouts and the opponent evaluation's 80 battles, next to the planner, and checks every order it gives against the hold-fire rule from outside. Results: [`RL.md`](RL.md).
+
+```bash
+python3 ml/rl_train.py                 # needs torch; about 17 minutes on two CPU cores, less on more
+python3 ml/rl_eval.py --weights ml/rl_runs/latest.json --no-write
+cp ml/rl_runs/latest.json ml/rl_policy.json && python3 ml/rl_eval.py     # ship it and rewrite RL.md
+python3 ml/test_rl.py                  # the environment and the mask, standard library only
+```
+
+`rl_policy.py` is the trained network's arithmetic in plain Python, so evaluation and CI need no PyTorch. The trainer refuses to write weights unless that code reproduces PyTorch's numbers.
+
 ## Limits
 
 - A contact flying toward a sensor looks the same whether it will attack or pass by. History narrows that, it does not remove it.

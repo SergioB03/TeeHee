@@ -513,6 +513,62 @@ for _ in range(8):
 check("once a contact hits a blue unit, the observation says which unit it hit", "B-F1" in named and named[0] == "")
 sim("reset")
 
+# --- serve: the same commands with the world kept in memory ----------------------
+def served(lines):
+    """Run command lines through one `edge-sim serve` process. Returns the parsed replies."""
+    text = "".join("\t".join(str(w) for w in line) + "\n" for line in lines)
+    out = subprocess.run([SIM, "serve"], input=text, capture_output=True, text=True).stdout
+    return [json.loads(l) for l in out.splitlines()]
+
+
+script = [["reset", "--scenario", "skirmish"], ["sensing", "--noise", "0.7", "--seed", "5"]]
+for t in range(10):
+    script += [["opponent", "--side", "red"], ["autopilot"], ["observe"], ["tick"]]
+script += [["order", "--id", "B-HQ", "--action", "defend", "--target", "R-J1", "--reason", "a reason with spaces"], ["status"]]
+live = served(script)
+sim("reset")
+by_file = [sim(*line, "--no-log")[1] for line in script]
+
+
+def close(a, b, tol=1e-4):
+    """Equal apart from rounding: a world file keeps six digits of a few values, memory keeps them all."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(close(a[k], b[k], tol) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(close(x, y, tol) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(a - b) <= tol
+    return a == b
+
+
+check("serve answers every command line with one line of JSON", len(live) == len(script) and all(r.get("ok") for r in live))
+check("a served rollout matches the command line, apart from rounding in the last digits",
+      len(by_file) == len(live) and all(close(a, b) for a, b in zip(by_file, live)))
+check("served and command-line rollouts give the same orders and the same events",
+      [r.get("orders") for r in live] == [r.get("orders") for r in by_file]
+      and live[-1]["world"]["events"] == by_file[-1]["world"]["events"])
+replies = served([["reset"], ["bogus"], ["order", "--id", "B-HQ", "--action", "fly"], ["status"], ["tick", "--no-world"],
+                  ["observe", "--no-world"], ["load"], ["status"]])
+check("an unknown line gets an error and the session carries on",
+      replies[1] == {"ok": False, "error": "unknown command"} and replies[3]["ok"] and len(replies) == 8)
+check("a refused command leaves the served world as it was",
+      replies[2]["ok"] is False and replies[3]["world"] == replies[0]["world"])
+check("--no-world leaves the world out of the reply", "world" not in replies[4] and "world" not in replies[5] and "observation" in replies[5])
+check("load without a world is refused", replies[6]["ok"] is False and replies[7]["world"]["tick"] == 1)
+world = replies[7]["world"]
+blue = [u for u in world["units"] if u["team"] == "blue"]
+expected = sum(u["hp"] / 100.0 * u["integrity"] for u in blue if u["alive"]) / len(blue)
+check("observe reports blue's mission value beside the observation, not inside it",
+      abs(replies[5]["blueValue"] - expected) < 1e-4 and "blueValue" not in replies[5]["observation"])
+code, out = sim("observe")
+check("the command line's observe reports the same value", code == 0 and abs(out["blueValue"] - sum(
+    u["hp"] / 100.0 * u["integrity"] for u in out["world"]["units"] if u["team"] == "blue" and u["alive"])
+    / len([u for u in out["world"]["units"] if u["team"] == "blue"])) < 1e-4)
+small = json.dumps({"tick": 0, "width": 12, "height": 12, "noise": 0, "seed": 0, "fusion": 1, "tracks": [], "events": [], "cover": [],
+                    "units": [u for u in world["units"] if u["id"] in ("B-HQ", "R-JET1")]}, separators=(",", ":"))
+replies = served([["load", small], ["status"]])
+check("load replaces the served world with the one given", replies[0]["ok"] and [u["id"] for u in replies[1]["world"]["units"]] == ["B-HQ", "R-JET1"])
+
 print()
 if failures:
     print("%d check(s) FAILED" % len(failures))

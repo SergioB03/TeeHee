@@ -97,9 +97,18 @@ Each requirement names the automated checks that verify it. CI runs `tools/trace
 | CON-04 | A container can tell whether it is healthy and stops at once when asked: the planner checks itself with --ping, and both programs exit with status 0 on a stop request. | the console and the planner start and report healthy (`docker/check.py`)<br>asked to stop, both containers exit within three seconds with status 0 (`docker/check.py`)<br>--ping reports a live node, even while other clients are connected (`native/tests/test_planner.py`)<br>asked to terminate, the node stops at once with status 0 (`native/tests/test_planner.py`)<br>asked to terminate, the server stops at once with status 0 (`web/test_sessions.py`) | `npm run test:web`, `npm test`, `python3 docker/check.py (CI jobs docker and ros2)` |
 | CON-05 | The ROS 2 bridge runs from an image with no ROS installed on the host: the demo plays its ticks and stops, and the bridge check passes inside the image. | the ROS 2 image builds (`docker/check.py`)<br>the ROS 2 demo plays its ticks over the topics and then stops by itself (`docker/check.py`)<br>the bridge check passes inside the ROS 2 image (`docker/check.py`) | `python3 docker/check.py (CI jobs docker and ros2)` |
 
+## Learned policy
+
+| ID | Requirement | Verified by | Run with |
+| --- | --- | --- | --- |
+| RL-01 | The learned policy is given the same observation message as the planner and nothing else, and its reward is the mission value every evaluation reports. | observe reports blue's mission value beside the observation, not inside it (`native/tests/test_cli.py`)<br>the reward adds up to the mission value the evaluations report (`ml/test_rl.py`)<br>every picture has the declared number of inputs (`ml/test_rl.py`) | `npm run test:rl`, `npm test` |
+| RL-02 | Hold fire is enforced on the learned policy as a mask on its choices: a shot at a contact below the watch line is never offered unless that contact has hit one of blue's aircraft, and the orders it gives are checked against the rule from outside. | hold fire: the fighter is not offered a contact scored below the watch line (`ml/test_rl.py`)<br>self-defense: a contact that has hit one of blue's aircraft is offered whatever its score (`ml/test_rl.py`)<br>in every picture from real games, the masks follow the same rules (`ml/test_rl.py`)<br>the shipped policy only ever picks a choice the rules offer (`ml/test_rl.py`)<br>no order to shoot breaks the hold-fire rule (`ml/rl_eval.py`) | `npm run eval:rl`, `npm run test:rl` |
+| RL-03 | Training is reproducible and runs on the simulator itself: the served simulator gives the same game as the command line, and the same seeds and choices give the same games. | a served rollout matches the command line, apart from rounding in the last digits (`native/tests/test_cli.py`)<br>served and command-line rollouts give the same orders and the same events (`native/tests/test_cli.py`)<br>the same seeds and the same choices give the same games, tick for tick (`ml/test_rl.py`) | `npm run test:rl`, `npm test` |
+| RL-04 | The shipped policy is worth having: it beats no defense on games it never trained on and covers at least half the distance to the planner. | the learned policy beats no defense on the scripted rollouts (`ml/rl_eval.py`)<br>the learned policy beats no defense against red's doctrine (`ml/rl_eval.py`)<br>the learned policy covers at least half the distance from no defense to the planner (`ml/rl_eval.py`) | `npm run eval:rl` |
+
 ## Coverage
 
-43 requirements, 121 links to checks.
+47 requirements, 135 links to checks.
 
-- `native/tests/test_cli.py`: 47 of 122 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.
+- `native/tests/test_cli.py`: 50 of 132 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.
 - `native/tests/test_planner.py`: 22 of 47 checks are linked to a requirement. The rest are input validation and regression checks that no requirement above depends on.

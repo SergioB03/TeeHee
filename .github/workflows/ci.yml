@@ -38,6 +38,10 @@ jobs:
         run: npm run eval:opponent
       - name: Sensing and tracker evaluation (quick version)
         run: npm run eval:tracking
+      - name: Training environment and hold-fire mask
+        run: npm run test:rl
+      - name: Learned policy against the planner (quick version; plain Python, no PyTorch)
+        run: npm run eval:rl
       - name: Software-in-the-loop (simulator plus a separate edge-node over TCP)
         run: npm run sil
       - name: Web console with twelve visitors at once (both sides, autopilot on and off, sandbox)
@@ -112,6 +116,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the console, planner and tools images, then run them (non-root, read-only, SIL across two containers)
         run: python3 docker/check.py
+
+  training:
+    name: Training image and a smoke run (CPU build of PyTorch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the training image with the CPU-only PyTorch
+        run: docker compose build --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cpu train-cpu
+      - name: Train for a minute, test on held-out games, export, and check the export against PyTorch
+        run: docker compose run --rm train-cpu python3 ml/rl_train.py --smoke
+      - name: The shipped policy runs in the image without touching the checkout
+        run: docker compose run --rm train-cpu python3 ml/test_rl.py
 
   ros2:
     name: ROS 2 bridge (Jazzy, in its Docker image)

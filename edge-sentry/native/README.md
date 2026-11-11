@@ -47,6 +47,8 @@ $S decisions --n 10           # the decision log
 
 Run `edge-sim` with no arguments for the full list of options.
 
+For bulk work there is `edge-sim serve`: one process that keeps the world in memory and reads one command per line on stdin, the same words separated by tabs, answering each with one line of JSON. `load<TAB>{world json}` replaces the world, and `--no-world` on any command leaves the world out of the reply. `observe` also reports `blueValue`, blue's mission value, beside the observation (never inside it): that is the reward the learned policy trains on. A served game is the same game; a test plays one both ways and compares every reply.
+
 The rules, briefly:
 
 - **Altitude.** Levels run from 0 (ground) to 5. Each aircraft type has its own speed, climb rate, ceiling, signature, damage and release altitude, all in one table (`src/profiles.hpp`). An attacker has to come down to its release altitude to hit a ground target.

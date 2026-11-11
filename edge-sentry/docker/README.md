@@ -32,6 +32,18 @@ docker buildx build --platform linux/arm64 --target edge-node -t edge-sentry-nod
 
 On the development machine that run agrees with the in-simulator planner on every tick, plans in about 13 µs and answers in about a quarter of a millisecond, with no reply over the 50 ms budget. A container limit caps how much of this CPU the planner may use; it does not make the CPU as slow as a Pi's, so this is still not a timing on real hardware.
 
+## Training on your own machine
+
+```bash
+docker compose build train                 # several GB: PyTorch with its CUDA libraries
+docker compose run --rm train              # trains the learned policy; uses an NVIDIA GPU if it can see one
+docker compose run --rm train python3 ml/rl_eval.py --weights ml/rl_runs/latest.json --no-write
+```
+
+The weights are written to `ml/rl_runs/latest.json` in your checkout. On a machine without an NVIDIA GPU use `train-cpu` in place of `train`; the first line of the log says which device is in use. On Windows the GPU reaches the container through Docker Desktop's WSL 2 backend and needs a current NVIDIA driver.
+
+What to expect: the network is small and the simulator runs on the CPU, so CPU threads set the pace (one simulator per thread) and the GPU has little to do at the default size. It starts to matter with a wider network (`--hidden 256`) and long runs (`--steps 20000000`). A run with `--roe free` trains without the hold-fire mask, which is how to measure what that rule costs.
+
 ## How the containers are confined
 
 - Every image runs as a non-root user.

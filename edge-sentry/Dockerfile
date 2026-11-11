@@ -1,9 +1,11 @@
-# One file, three images.
+# One file, four images.
 #
 #   console    the web console with the simulator         docker compose up
 #   edge-node  the autonomy planner and nothing else      (same command; it listens on 127.0.0.1:7700)
 #   tools      the simulator, the planner and the test    docker compose run --rm sil
 #              harnesses, for running the checks in a container
+#   train      the simulator and PyTorch, to train the        docker compose run --rm train
+#              learned policy (on a GPU if there is one)
 #
 # The compiler stage runs on the build machine's own architecture and
 # cross-compiles when the target differs, so this makes a Raspberry Pi or
@@ -65,6 +67,22 @@ COPY ml/simlab.py ml/
 COPY sil/run_sil.py sil/
 USER 65534:65534
 CMD ["python3", "sil/run_sil.py", "--check", "--no-write"]
+
+# ---- training: the simulator plus PyTorch -----------------------------------------
+# The default build installs PyTorch from PyPI, which brings its own CUDA libraries, so the
+# container can use an NVIDIA GPU with nothing but the driver on the host. For a machine with no
+# GPU (and for CI) the CPU-only build is a tenth of the size:
+#   docker compose build --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cpu train-cpu
+FROM python:3.12-slim-bookworm AS train
+ARG TORCH_INDEX=https://pypi.org/simple
+ARG TORCH_VERSION=2.15.0
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN pip install --index-url "$TORCH_INDEX" "torch==$TORCH_VERSION"
+WORKDIR /app
+COPY --from=build /out/edge-sim native/build/edge-sim
+COPY ml/simlab.py ml/rl_env.py ml/rl_policy.py ml/rl_train.py ml/rl_eval.py ml/test_rl.py ml/rl_policy.json ml/
+USER 65534:65534
+CMD ["python3", "ml/rl_train.py"]
 
 # ---- the web console (last, so a plain `docker build .` makes this one) --------
 FROM node:22-bookworm-slim AS console

@@ -17,6 +17,9 @@
     "sil": "python3 sil/run_sil.py --rollouts 12 --check --no-write",
     "eval:tracking": "python3 ml/tracking_eval.py --rollouts 20 --check --no-write",
     "eval:opponent": "python3 ml/opponent_eval.py --rollouts 20 --check --no-write",
+    "eval:rl": "python3 ml/rl_eval.py --rollouts 30 --battles 16 --check --no-write",
+    "test:rl": "python3 ml/test_rl.py",
+    "train:rl": "python3 ml/rl_train.py",
     "trace": "python3 tools/trace.py --check",
     "docs:check": "python3 tools/check_docs.py"
   },

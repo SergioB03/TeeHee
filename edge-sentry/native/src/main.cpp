@@ -37,11 +37,15 @@ void usage() {
       << "                                                report noisy positions, and blue sees its tracker's estimate.\n"
       << "                                                --fusion off drops the tracker (best single detection only)\n"
       << "  edge-sim inputs                               names of the learned model's inputs, in order\n"
+      << "  edge-sim serve [--scorer S]                   keep the world in memory and read one command per line on stdin\n"
+      << "                                                (the same words, separated by tabs; `load<TAB>{json}` sets the world).\n"
+      << "                                                For training loops: no process or file per command\n"
       << "Options:\n"
       << "  --scorer <learned|heuristic|sequence>   which threat scorer fills threatScore (default learned)\n"
       << "  --actor <name>                 who is issuing this command, recorded in the decision log (default cli)\n"
       << "  --reason <text>                why, recorded in the decision log\n"
       << "  --no-log                       do not write to the decision log (bulk rollouts)\n"
+      << "  --no-world                     leave the world out of the reply\n"
       << "The decision log is <world path>.decisions.jsonl: one JSON line per reset, spawn and order,\n"
       << "with the threat picture the decision was made on.\n";
 }
@@ -71,6 +75,19 @@ World loadOrInit(const std::string& path) {
   return World::fromJson(raw);
 }
 
+// Where the world lives between commands: a file (one process per command),
+// or this process's memory (`edge-sim serve`).
+struct Store {
+  std::string path;       // the world file; empty when serving from memory
+  World* live = nullptr;  // the world itself when serving
+  World load() const { return live ? *live : loadOrInit(path); }
+  bool save(const World& w) const {
+    if (!live) return writeFile(path, w.toJson(true));
+    *live = w;
+    return true;
+  }
+};
+
 // Parsed command line. Options that take a value consume the next token, so
 // a value can never be mistaken for a flag (a reason of "--no-log" or a unit
 // id of "--scorer" stays plain text).
@@ -82,7 +99,8 @@ struct Args {
 
 bool isCommand(const std::string& a) {
   return a == "status" || a == "reset" || a == "tick" || a == "score" || a == "spawn" || a == "order" ||
-         a == "decisions" || a == "inputs" || a == "opponent" || a == "observe" || a == "autopilot" || a == "sensing";
+         a == "decisions" || a == "inputs" || a == "opponent" || a == "observe" || a == "autopilot" || a == "sensing" ||
+         a == "serve";
 }
 
 Args parseArgs(const std::vector<std::string>& raw) {
@@ -201,44 +219,9 @@ bool parseInt(const std::string& s, int& out) {
     return false;
   }
 }
-}  // namespace
-
-int main(int argc, char** argv) {
-  std::vector<std::string> raw;
-  for (int i = 1; i < argc; ++i) raw.emplace_back(argv[i]);
-  const Args args = parseArgs(raw);
-
-  if (raw.empty() || hasFlag(args, "--help") || hasFlag(args, "-h")) {
-    usage();
-    return raw.empty() ? 2 : 0;
-  }
-
-  if (args.command == "inputs") {
-    std::vector<std::string> names;
-    for (const auto& n : modelInputNames()) names.push_back(jsonString(n));
-    std::cout << "{\"ok\":true,\"command\":\"inputs\",\"inputs\":[" << joinComma(names)
-              << "],\"sequenceInputs\":" << kSequenceInputs << "}\n";
-    return 0;
-  }
-
-  const std::string worldPath = argValue(args, "--world");
-  if (worldPath.empty()) {
-    std::cerr << "{\"error\":\"missing --world path\"}\n";
-    return 2;
-  }
-
-  // Must be set before the world loads: loading rescores every track.
-  if (hasFlag(args, "--scorer")) {
-    const std::string scorer = argValue(args, "--scorer");
-    if (scorer == "learned") World::activeScorer = ScorerKind::Learned;
-    else if (scorer == "heuristic") World::activeScorer = ScorerKind::Heuristic;
-    else if (scorer == "sequence") World::activeScorer = ScorerKind::Sequence;
-    else {
-      std::cout << "{\"ok\":false,\"error\":\"bad --scorer (expected learned, heuristic or sequence)\"}\n";
-      return 1;
-    }
-  }
-
+// Run one command against the world in `store` and write the one-line JSON
+// reply to `out`. Returns the process exit code the command line gives.
+int run(const Args& args, const Store& store, std::ostream& out) {
   const std::string cmd = args.command;
   if (cmd.empty()) {
     std::cerr << "{\"error\":\"missing command\"}\n";
@@ -246,15 +229,16 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  const std::string logPath = worldPath + ".decisions.jsonl";
+  // No decision log when the world is served from memory: there is no file to keep it beside.
+  const std::string logPath = store.path.empty() ? std::string() : store.path + ".decisions.jsonl";
   if (cmd == "decisions") {
     int n = 20;
     const std::string ns = argValue(args, "--n");
     if (!ns.empty() && (!parseInt(ns, n) || n < 1 || n > 500)) {
-      std::cout << "{\"ok\":false,\"error\":\"bad --n (expected integer 1..500)\"}\n";
+      out << "{\"ok\":false,\"error\":\"bad --n (expected integer 1..500)\"}\n";
       return 1;
     }
-    std::cout << "{\"ok\":true,\"command\":\"decisions\",\"decisions\":[" << lastLines(logPath, n) << "]}\n";
+    out << "{\"ok\":true,\"command\":\"decisions\",\"decisions\":[" << lastLines(logPath, n) << "]}\n";
     return 0;
   }
 
@@ -262,18 +246,18 @@ int main(int argc, char** argv) {
   if (hasFlag(args, "--actor")) {
     actor = argValue(args, "--actor");
     if (!validActor(actor)) {
-      std::cout << "{\"ok\":false,\"error\":\"bad --actor (letters, digits, - and _, up to 24)\"}\n";
+      out << "{\"ok\":false,\"error\":\"bad --actor (letters, digits, - and _, up to 24)\"}\n";
       return 1;
     }
   }
   std::string reason = argValue(args, "--reason");
   if (reason.size() > kMaxReasonChars) reason.resize(kMaxReasonChars);
 
-  World world = loadOrInit(worldPath);
+  World world = store.load();
   std::string err;
   // Decisions are judged against the picture they were made on, so capture
   // it before the command changes anything.
-  const bool isDecision = (cmd == "reset" || cmd == "spawn" || cmd == "order") && !hasFlag(args, "--no-log");
+  const bool isDecision = (cmd == "reset" || cmd == "spawn" || cmd == "order") && !hasFlag(args, "--no-log") && !logPath.empty();
   const int tickBefore = world.tick;
   const std::string pictureBefore = isDecision ? pictureJson(world) : std::string();
 
@@ -341,7 +325,7 @@ int main(int argc, char** argv) {
         if (m.tx >= 0) a << ",\"tx\":\"" << m.tx << "\",\"ty\":\"" << m.ty << "\"";
         if (!m.targetId.empty()) a << ",\"target\":" << jsonString(m.targetId);
         a << "}";
-        if (!hasFlag(args, "--no-log") && !dryRun) {
+        if (!hasFlag(args, "--no-log") && !dryRun && !logPath.empty()) {
           appendDecision(logPath, world.tick, who, "order", a.str(), m.reason, moveErr, picture);
         }
         std::ostringstream o;
@@ -438,18 +422,120 @@ int main(int argc, char** argv) {
   }
 
   if (!err.empty()) {
-    std::cout << "{\"ok\":false,\"error\":\"" << err << "\"}\n";
+    out << "{\"ok\":false,\"error\":\"" << err << "\"}\n";
     return 1;
   }
 
-  if (!writeFile(worldPath, world.toJson(true))) {
-    std::cout << "{\"ok\":false,\"error\":\"failed to write world\"}\n";
+  if (!store.save(world)) {
+    out << "{\"ok\":false,\"error\":\"failed to write world\"}\n";
     return 1;
   }
 
-  std::cout << "{\"ok\":true,\"command\":\"" << cmd << "\"";
-  if (cmd == "opponent" || cmd == "autopilot") std::cout << ",\"orders\":" << opponentOrders;
-  if (cmd == "observe") std::cout << ",\"observation\":" << observationToJson(world.observe());
-  std::cout << ",\"world\":" << world.toJson(false) << "}\n";
+  out << "{\"ok\":true,\"command\":\"" << cmd << "\"";
+  if (cmd == "opponent" || cmd == "autopilot") out << ",\"orders\":" << opponentOrders;
+  if (cmd == "observe") {
+    // blueValue is the score everything is judged on: health x integrity, averaged over
+    // blue's units, lost ones counting as zero. It rides beside the observation, not in it:
+    // a training loop needs it as the reward, and the autonomy is never shown it.
+    double value = 0.0;
+    int blue = 0;
+    for (const auto& u : world.units) {
+      if (u.team != Team::Blue) continue;
+      ++blue;
+      if (u.alive) value += (u.hp / 100.0) * u.integrity;
+    }
+    out << ",\"observation\":" << observationToJson(world.observe()) << ",\"blueValue\":" << (blue ? value / blue : 0.0);
+  }
+  // --no-world leaves the world out of the reply: a training loop that only wants the
+  // observation or an acknowledgement does not pay to print and parse it.
+  if (!hasFlag(args, "--no-world")) out << ",\"world\":" << world.toJson(false);
+  out << "}\n";
   return 0;
+}
+
+// `edge-sim serve`: keep the world in memory and take one command per line on
+// stdin, as the same words the command line takes, separated by tabs. Each
+// command gets exactly one line of JSON on stdout. It exists for training
+// loops and bulk rollouts, where starting a process and rewriting a file for
+// every command costs a hundred times more than the command itself.
+//
+//   load<TAB>{...world json...}     replace the world (the same JSON a world file holds)
+//   tick<TAB>--n<TAB>1              any ordinary command
+//   quit                            stop (so does the end of input)
+int serve() {
+  World world = World::defaultScenario();
+  const Store store{std::string(), &world};
+  std::string line;
+  while (std::getline(std::cin, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    std::vector<std::string> words;
+    size_t from = 0;
+    for (;;) {
+      const size_t tab = line.find('\t', from);
+      words.push_back(line.substr(from, tab == std::string::npos ? std::string::npos : tab - from));
+      if (tab == std::string::npos) break;
+      from = tab + 1;
+    }
+    if (words[0].empty()) continue;
+    if (words[0] == "quit") break;
+    if (words[0] == "load") {
+      if (words.size() != 2 || words[1].empty()) {
+        std::cout << "{\"ok\":false,\"error\":\"load needs the world as one JSON value after a tab\"}" << std::endl;
+      } else {
+        world = World::fromJson(words[1]);
+        std::cout << "{\"ok\":true,\"command\":\"load\"}" << std::endl;
+      }
+      continue;
+    }
+    const Args args = parseArgs(words);
+    if (args.command.empty() || args.command == "serve" || args.command == "inputs") {
+      std::cout << "{\"ok\":false,\"error\":\"unknown command\"}" << std::endl;
+      continue;
+    }
+    run(args, store, std::cout);
+    std::cout.flush();
+  }
+  return 0;
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+  std::vector<std::string> raw;
+  for (int i = 1; i < argc; ++i) raw.emplace_back(argv[i]);
+  const Args args = parseArgs(raw);
+
+  if (raw.empty() || hasFlag(args, "--help") || hasFlag(args, "-h")) {
+    usage();
+    return raw.empty() ? 2 : 0;
+  }
+
+  if (args.command == "inputs") {
+    std::vector<std::string> names;
+    for (const auto& n : modelInputNames()) names.push_back(jsonString(n));
+    std::cout << "{\"ok\":true,\"command\":\"inputs\",\"inputs\":[" << joinComma(names)
+              << "],\"sequenceInputs\":" << kSequenceInputs << "}\n";
+    return 0;
+  }
+
+  const bool serving = args.command == "serve";
+  const std::string worldPath = argValue(args, "--world");
+  if (worldPath.empty() && !serving) {
+    std::cerr << "{\"error\":\"missing --world path\"}\n";
+    return 2;
+  }
+
+  // Must be set before the world loads: loading rescores every track.
+  if (hasFlag(args, "--scorer")) {
+    const std::string scorer = argValue(args, "--scorer");
+    if (scorer == "learned") World::activeScorer = ScorerKind::Learned;
+    else if (scorer == "heuristic") World::activeScorer = ScorerKind::Heuristic;
+    else if (scorer == "sequence") World::activeScorer = ScorerKind::Sequence;
+    else {
+      std::cout << "{\"ok\":false,\"error\":\"bad --scorer (expected learned, heuristic or sequence)\"}\n";
+      return 1;
+    }
+  }
+
+  if (serving) return serve();
+  return run(args, Store{worldPath}, std::cout);
 }

@@ -783,5 +783,89 @@
         "the bridge check passes inside the ROS 2 image"
       ]
     ]
+  },
+  {
+    "id": "RL-01",
+    "area": "Learned policy",
+    "text": "The learned policy is given the same observation message as the planner and nothing else, and its reward is the mission value every evaluation reports.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "observe reports blue's mission value beside the observation, not inside it"
+      ],
+      [
+        "ml/test_rl.py",
+        "the reward adds up to the mission value the evaluations report"
+      ],
+      [
+        "ml/test_rl.py",
+        "every picture has the declared number of inputs"
+      ]
+    ]
+  },
+  {
+    "id": "RL-02",
+    "area": "Learned policy",
+    "text": "Hold fire is enforced on the learned policy as a mask on its choices: a shot at a contact below the watch line is never offered unless that contact has hit one of blue's aircraft, and the orders it gives are checked against the rule from outside.",
+    "tests": [
+      [
+        "ml/test_rl.py",
+        "hold fire: the fighter is not offered a contact scored below the watch line"
+      ],
+      [
+        "ml/test_rl.py",
+        "self-defense: a contact that has hit one of blue's aircraft is offered whatever its score"
+      ],
+      [
+        "ml/test_rl.py",
+        "in every picture from real games, the masks follow the same rules"
+      ],
+      [
+        "ml/test_rl.py",
+        "the shipped policy only ever picks a choice the rules offer"
+      ],
+      [
+        "ml/rl_eval.py",
+        "no order to shoot breaks the hold-fire rule"
+      ]
+    ]
+  },
+  {
+    "id": "RL-03",
+    "area": "Learned policy",
+    "text": "Training is reproducible and runs on the simulator itself: the served simulator gives the same game as the command line, and the same seeds and choices give the same games.",
+    "tests": [
+      [
+        "native/tests/test_cli.py",
+        "a served rollout matches the command line, apart from rounding in the last digits"
+      ],
+      [
+        "native/tests/test_cli.py",
+        "served and command-line rollouts give the same orders and the same events"
+      ],
+      [
+        "ml/test_rl.py",
+        "the same seeds and the same choices give the same games, tick for tick"
+      ]
+    ]
+  },
+  {
+    "id": "RL-04",
+    "area": "Learned policy",
+    "text": "The shipped policy is worth having: it beats no defense on games it never trained on and covers at least half the distance to the planner.",
+    "tests": [
+      [
+        "ml/rl_eval.py",
+        "the learned policy beats no defense on the scripted rollouts"
+      ],
+      [
+        "ml/rl_eval.py",
+        "the learned policy beats no defense against red's doctrine"
+      ],
+      [
+        "ml/rl_eval.py",
+        "the learned policy covers at least half the distance from no defense to the planner"
+      ]
+    ]
   }
 ]

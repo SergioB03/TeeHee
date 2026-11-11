@@ -26,11 +26,14 @@ def read(*parts):
         return f.read()
 
 
-def cell(report, row_starts_with, column):
-    """One cell of a Markdown table row in a generated report (column 0 is the row's label)."""
+def cell(report, row_starts_with, column, nth=1):
+    """One cell of a Markdown table row in a generated report (column 0 is the row's label).
+    nth picks among rows with the same label, for reports with more than one table."""
     for line in read(ROOT, report).splitlines():
         if line.startswith("| " + row_starts_with):
-            return line.strip().strip("|").split("|")[column].strip()
+            nth -= 1
+            if nth == 0:
+                return line.strip().strip("|").split("|")[column].strip()
     raise SystemExit(f"{report}: no table row starts with '{row_starts_with}'. Update tools/check_docs.py.")
 
 
@@ -54,6 +57,8 @@ headline = [
     ("fighter survival now, ml/OPPONENT.md", cell("ml/OPPONENT.md", "Coordinated doctrine | the planner (both lessons)", 6)),
     ("position error with the tracker, ml/TRACKING.md", cell("ml/TRACKING.md", "Heavy noise, tracker", 2)),
     ("position error without it, ml/TRACKING.md", cell("ml/TRACKING.md", "Heavy noise, no tracker", 2)),
+    ("the learned policy on scripted rollouts, ml/RL.md", cell("ml/RL.md", "The learned policy", 1)),
+    ("the learned policy in battles, ml/RL.md", cell("ml/RL.md", "The learned policy", 1, nth=2)),
 ]
 for why, value in headline:
     for path in (LANDING, MAIN):

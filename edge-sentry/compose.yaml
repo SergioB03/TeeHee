@@ -5,6 +5,7 @@
 #   docker compose run --rm sil              software-in-the-loop: the simulator in one container,
 #                                            the planner in another, talking over the network
 #   docker compose --profile ros2 up ros2    the ROS 2 demo, with no ROS on your machine
+#   docker compose run --rm train            train the learned policy (uses an NVIDIA GPU if it can)
 #   docker compose down                      stop; add -v to also delete the saved worlds
 #
 # Every service runs as a non-root user with all Linux capabilities dropped,
@@ -54,6 +55,31 @@ services:
       - --no-write
       - --label
       - a separate container held to half a CPU core and 32 MB of memory
+
+  # Train the learned policy. The weights are written into ./ml, so they land in your checkout.
+  #   docker compose run --rm train                          on an NVIDIA GPU
+  #   docker compose run --rm train-cpu                      on a machine without one
+  #   docker compose run --rm train python3 ml/rl_eval.py    compare the result with the planner
+  train: &train
+    profiles: [train]
+    build: { context: ., target: train }
+    image: edge-sentry-train
+    user: "${UID:-1000}:${GID:-1000}"   # so the weights it writes belong to you, not to root
+    environment: { HOME: /tmp }
+    volumes: ["./ml:/app/ml"]
+    tmpfs: ["/tmp"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: [python3, ml/rl_train.py]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  train-cpu:
+    <<: *train
+    deploy: {}
 
   ros2:
     profiles: [ros2]
