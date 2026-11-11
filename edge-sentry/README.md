@@ -58,6 +58,17 @@ The last column matters because the simulator does not punish shooting an aircra
 
 A reply that misses the 50 ms tick budget is thrown away and units keep their last orders, so a bad link degrades gradually and a dead one is exactly as good as no autonomy (0.878), never worse. Those timings are from the development machine. CI also cross-compiles the node for arm64 and runs the same tests under emulation, which shows the build is right for a Raspberry Pi or Jetson but says nothing about their speed; it has not been timed on a physical device yet.
 
+**Noisy sensors.** Everything above uses a perfect picture. With sensing noise on (`edge-sim sensing --noise 0.7`), each sensor detects a contact only some of the time and reports a position that is a little off, worse at range, at low signature, behind cover and under jamming. A per-contact Kalman filter fuses the sensors' reports, rides through gaps of up to three ticks, then drops the track. The threat model and the planner see only that picture. Over 100 rollouts under heavy noise:
+
+| Picture | Position error | Tracks lost per rollout | Threat AUC | Mission value with the planner |
+| --- | --- | --- | --- | --- |
+| Perfect | 0 | 0 | 0.975 | 0.976 |
+| Heavy noise, best single detection (no tracker) | 0.54 cells | 1.96 | 0.878 | 0.963 |
+| Heavy noise, tracker | 0.29 cells | 0.01 | 0.916 | 0.970 |
+| Heavy noise, tracker, model retrained on noisy tracks | 0.29 cells | 0.01 | 0.963 | not yet run |
+
+The tracker halves the position error and almost never loses a contact. The shipped threat model, trained only on the perfect picture, still loses 0.06 of AUC under heavy noise; retraining the same network on tracker output at mixed noise levels wins most of that back (0.963) and costs 0.001 on the perfect picture. That retrained model is an experiment and is not the default yet, so its effect on mission value is not measured. Detections also arrive already matched to a contact: telling contacts apart is not modelled. Full table: [`ml/TRACKING.md`](ml/TRACKING.md).
+
 **Does a recurrent model need the hand-built history?** No. The sequence model is a 16-unit GRU trained with PyTorch that gets only the 20 inputs describing the current tick and has to remember the track itself. It matches the default model on held-out AUC (0.967 vs 0.968), passes the same number of scripted scenarios, and is slightly ahead on outcomes (0.954 vs 0.951 mission value). That is a tie within noise, reached with less feature engineering. The default stays the smaller model; `--scorer sequence` switches to the GRU, and every track reports both scores.
 
 Where it falls short: on aircraft and missiles alone, the heuristic that is allowed to read each contact's real target still ranks slightly better (0.942 vs 0.938 AUC); the models win overall and on every outcome measure. Both models fail the same two scripted scenarios: a jet that parks beside HQ without firing (read as benign; a human would keep watching) and a distant jammer that they call hostile before it has moved. They also need a tick or two of motion before they can read intent. Moving to 3D made the task harder: AUC was 0.978 on the earlier flat simulator.
@@ -126,10 +137,11 @@ npx @grok/agent-sdk dev     # open http://127.0.0.1:3000/playground
 Tests and model evaluation (Python standard library only):
 
 ```bash
-npm test               # 101 CLI checks and 27 planner checks
+npm test               # 114 CLI checks and 27 planner checks
 npm run eval:model     # held-out metrics, 19 scenarios, C++/Python parity
 npm run eval:outcome   # triage policies compared on outcomes (quick version)
 npm run eval:autonomy  # the planner against simpler defense rules (quick version)
+npm run eval:tracking  # noisy sensing: tracker against no tracker (quick version)
 npm run sil            # simulator against a separate edge-node over TCP
 ```
 
@@ -147,6 +159,7 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 - The GRU runs in plain C++ with no ML runtime: weights are compiled in, and each contact's hidden state is saved in the world file and advanced exactly once per tick, however many times the world is read in between.
 - The web server passes validated arguments to the binary without a shell and serializes commands, so parallel requests cannot corrupt the world file.
 - The computer opponent is a simulator command (`edge-sim opponent --side red|blue`), so its behavior is deterministic and covered by the CLI tests. Game rules (whose units you may order, the 20-tick limit, the score) are enforced on the server, not in the page.
+- Sensor noise is drawn from a hash of the seed, tick, contact and sensor rather than a running generator, so a noisy run replays exactly and does not depend on how many times the world was read. With noise at 0 the tracker is skipped entirely and every earlier result is unchanged.
 - The planner keeps nothing between ticks. Everything it needs is in the observation, so the in-simulator copy and the edge node cannot drift apart, and a node that restarts is correct again on the next message. The observation never contains a contact's orders or target, and a test checks that.
 - The planner's rules are pinned by 27 checks that hand it written-out observations (no simulator involved): which contact gets point defense, when the fighter engages, shadows, breaks off or goes home.
 - [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) records a code review of the first version: five bugs found, fixed, and covered by regression tests.
@@ -155,7 +168,7 @@ The agent's outcome eval (`evals/outcome.eval.ts`) seeds eight scenarios, lets t
 
 1. Time the edge node on a physical Raspberry Pi or Jetson (`sil/README.md` has the two commands)
 2. A learned policy (reinforcement learning) compared with the planner on the same rollouts
-3. Noisy measurements, lost tracks and a tracker, so the autonomy works from sensor data instead of clean positions
+3. Make the noise-trained threat model the default and re-run every evaluation on it; then drop the assumption that detections arrive already matched to a contact
 4. ROS 2 bridge: observations and orders as topics
 5. Requirements table that maps each rule to the test that checks it
 6. Run the outcome-graded agent eval and compare the agent with the planner

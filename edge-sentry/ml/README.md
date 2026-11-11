@@ -70,6 +70,10 @@ python3 ml/train_seq.py    # needs torch; or run the "Train sequence model" work
 
 The scenario expectations were written from each scenario's intent (who attacks, who never does) and were not changed after seeing any scorer's output. Five of them exercise the 3D rules: a stealth attack run, a high-level bomber run, a drone coming in low behind cover, a jet that descends far away and holds, and a fighter orbiting at long range. Both models fail the same two of the 19.
 
+## Sensing and tracking
+
+`tracking_eval.py` turns sensing noise on and compares a per-contact Kalman tracker with using the best single detection each tick: how often a contact has a track, how far the picture is from the truth, how many tracks are lost, and what that does to the threat model's AUC and to the planner's mission value. `train.py --noise-mix` retrains the same network on tracker output at mixed noise levels and writes `model_noise_mix.json`; it is scored by the Python reference only and does not replace the shipped weights. Results: `TRACKING.md`.
+
 ## Evaluation: outcomes
 
 A good score only matters if acting on it helps. `outcome.py` gives blue one defensive resource (the HQ's point defense covers against one contact per tick) and lets each scorer decide where to put it, by score × severity. Every policy plays the same 150 rollouts and is scored on mission value: the average over every tick and blue asset of health × integrity.

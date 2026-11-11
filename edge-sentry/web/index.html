@@ -250,6 +250,10 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
 .labels .hp.red { fill: var(--red); }
 .placing .craft { pointer-events: none; }
 .keys { display: none; }
+.est { fill: none; stroke: var(--blue); stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
+.est-line { stroke: var(--blue); stroke-width: 0.7; opacity: 0.7; pointer-events: none; }
+.unit.untracked, .craft.untracked, .gunit.untracked { opacity: 0.38; }
+#sensors { margin-top: 18px; }
 
 /* Wide screens: big map on the left that stays in view, everything else in a panel on the right */
 @media (min-width: 1000px) {
@@ -364,6 +368,23 @@ summary { font: 600 15px/1 var(--label); padding: 16px 0; cursor: pointer; }
     <h2>Decision log</h2>
     <ol class="rows decisions" id="decisions"></ol>
   </section>
+
+  <details id="sensors">
+    <summary>Sensors</summary>
+    <div class="spawn">
+      <select id="noise" aria-label="Sensor noise">
+        <option value="0">Perfect picture</option>
+        <option value="0.35">Light noise</option>
+        <option value="0.7">Heavy noise</option>
+        <option value="1">Worst case</option>
+      </select>
+      <select id="fusion" aria-label="Tracker">
+        <option value="on">Tracker on</option>
+        <option value="off">No tracker</option>
+      </select>
+    </div>
+    <p class="key">With noise on, blue's sensors miss contacts some of the time and report positions that are a little off. A dashed blue circle shows where blue thinks a contact is and how unsure it is; a faded red unit has no track, so the threat model and the planner cannot see it. The tracker blends every sensor's reports and rides through short gaps.</p>
+  </details>
 
   <details id="addUnit">
     <summary>Add a unit</summary>
@@ -586,8 +607,13 @@ function headingOf(u) {
   return [hx, hy];
 }
 
+// With sensor noise on: blue's tracks, and whether a red unit currently has one.
+const noisyTracks = () => (world.noise > 0 ? world.tracks : []);
+const untracked = (u) => world.noise > 0 && u.team === "red" && u.alive && !world.tracks.some((t) => t.sourceUnitId === u.id);
+
 function dressUnit(el, u, angle) {
   el.classList.toggle("dead", !u.alive);
+  el.classList.toggle("untracked", untracked(u));
   el.classList.toggle("selected", u.id === selectedId);
   el.querySelector(".hp").setAttribute("width", (Math.max(0, Math.min(100, u.hp)) / 100) * 22);
   const icon = el.querySelector(".icon");
@@ -615,7 +641,7 @@ const pts = (list) => list.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).j
 // (tilted) horizontal plane at its altitude, turned to its heading, nose up or
 // down while it climbs or dives, and banked while it orbits.
 function drawCraft(root, u, x, y, gx, gy, labels) {
-  const g = svg("g", { class: `craft ${u.team}${u.id === selectedId ? " selected" : ""}`, role: "button", tabindex: 0 }, root);
+  const g = svg("g", { class: `craft ${u.team}${u.id === selectedId ? " selected" : ""}${untracked(u) ? " untracked" : ""}`, role: "button", tabindex: 0 }, root);
   g.dataset.id = u.id;
   g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type]} at ${u.x}, ${u.y}, level ${u.z}`);
   const [hx, hy] = headingOf(u);
@@ -660,7 +686,7 @@ function drawCraft(root, u, x, y, gx, gy, labels) {
 // with a flag, a sensor a mast with a dish, a relay a lattice tower, a jammer a
 // block with radio waves.
 function drawGround(root, u, n, labels) {
-  const g = svg("g", { class: `gunit ${u.team}${u.id === selectedId ? " selected" : ""}`, role: "button", tabindex: 0 }, root);
+  const g = svg("g", { class: `gunit ${u.team}${u.id === selectedId ? " selected" : ""}${untracked(u) ? " untracked" : ""}`, role: "button", tabindex: 0 }, root);
   if (n) g.setAttribute("transform", `translate(${n * 22} ${-n * 6})`);
   g.dataset.id = u.id;
   g.setAttribute("aria-label", `${u.id}, ${u.team} ${KIND[u.type] ?? u.type} at ${u.x}, ${u.y}`);
@@ -804,6 +830,11 @@ function render3d() {
     if (covered && covered.alive) line("cover-line", at(u), at(covered), flat);
   }
 
+  for (const t of noisyTracks()) {
+    const [x, y] = proj(t.ex + 0.5, t.ey + 0.5, 0);
+    const r = Math.max(0.25, t.err) * V3.S;
+    svg("ellipse", { class: "est", cx: x, cy: y, rx: r, ry: r * V3.K }, flat);
+  }
   // Far units first so nearer ones draw over them.
   const order = [...world.units].sort((a, b) => Number(a.alive) - Number(b.alive) || at(a)[2] - at(b)[2]);
   const stack = new Map();
@@ -859,6 +890,12 @@ function renderMap() {
     if (tgt && tgt.alive) svg("line", { class: "aim", x1: cx(u.x), y1: cy(u.y), x2: cx(tgt.x), y2: cy(tgt.y) }, lines);
     const covered = u.order.action === "defend" ? unitById(u.order.targetId) : null;
     if (covered && covered.alive) svg("line", { class: "cover-line", x1: cx(u.x), y1: cy(u.y), x2: cx(covered.x), y2: cy(covered.y) }, lines);
+  }
+
+  for (const t of noisyTracks()) {
+    const u = unitById(t.sourceUnitId);
+    svg("circle", { class: "est", cx: cx(t.ex), cy: cy(t.ey), r: Math.max(0.25, t.err) * CELL }, lines);
+    if (u) svg("line", { class: "est-line", x1: cx(u.x), y1: cy(u.y), x2: cx(t.ex), y2: cy(t.ey) }, lines);
   }
 
   const layer = $("L-units");
@@ -965,7 +1002,7 @@ function renderLists() {
     const mid = html("div", { className: "pair" }, row);
     mid.appendChild(meter(t.threatLabel, t.threatScore, [t.watchAt ?? 0.33, t.hostileAt ?? 0.66]));
     const level = isAir(u) ? ` at level ${t.z}` : "";
-    html("small", { textContent: `${KIND[u.type]}${level}, threat ${t.threatScore.toFixed(2)}, signal ${t.snr.toFixed(2)}${t.locked === false ? ", no lock" : ""}` }, mid);
+    html("small", { textContent: `${KIND[u.type]}${level}, threat ${t.threatScore.toFixed(2)}, signal ${t.snr.toFixed(2)}${t.locked === false ? ", no lock" : ""}${world.noise > 0 ? `, position within ${Math.max(0.1, t.err).toFixed(1)} cells` : ""}` }, mid);
     html("span", { className: "tag " + t.threatLabel, textContent: t.threatLabel }, row);
   }
 
@@ -1000,6 +1037,9 @@ function renderGame() {
   $("modeIdle").hidden = !!game;
   $("modeGame").hidden = !game;
   $("addUnit").hidden = !!game;
+  $("sensors").hidden = !!game;
+  $("noise").value = String(world.noise ?? 0);
+  $("fusion").value = world.fusion === 0 ? "off" : "on";
   $("reset").textContent = game ? "Restart game" : "Reset scenario";
   if (!game) return;
   const you = game.side, them = you === "blue" ? "red" : "blue";
@@ -1156,6 +1196,7 @@ $("turnRight").onclick = () => { yaw += Math.PI / 8; render(); };
 }
 $("spawnGo").onclick = () => { selectedId = null; setMode("spawn"); document.querySelector(".chart").scrollIntoView({ block: "center", behavior: "smooth" }); };
 $("spawnTeam").onchange = $("spawnType").onchange = () => renderHint();
+$("noise").onchange = $("fusion").onchange = () => api("/api/sensing", { noise: Number($("noise").value), fusion: $("fusion").value === "on" });
 
 api("/api/state");
 </script>

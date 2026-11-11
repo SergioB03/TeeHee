@@ -67,6 +67,10 @@ class Sim:
         self.world = os.path.join(self.dir, "world.json")
         self.scorer = scorer
         self.log = log
+        # Sensing for worlds this wrapper loads: 0 = perfect picture. See `edge-sim sensing`.
+        self.noise = 0.0
+        self.seed = 0
+        self.fusion = True
 
     def run(self, *args):
         # --no-log: bulk rollouts would otherwise fill the decision log.
@@ -81,7 +85,8 @@ class Sim:
 
     def load(self, units):
         """Start from a hand-built unit list instead of the default scenario."""
-        world = {"tick": 0, "width": 12, "height": 12, "units": units, "tracks": [], "events": [], "cover": []}
+        world = {"tick": 0, "width": 12, "height": 12, "noise": self.noise, "seed": self.seed,
+                 "fusion": 1 if self.fusion else 0, "units": units, "tracks": [], "events": [], "cover": []}
         with open(self.world, "w") as f:
             json.dump(world, f, separators=(",", ":"))
         return self.run("status")
@@ -282,10 +287,13 @@ def label_rows(snaps, seed, horizon=HORIZON):
     return rows
 
 
-def dataset(seeds, binary=None):
+def dataset(seeds, binary=None, noise_for=None):
+    """Labelled rows from random rollouts. noise_for(seed) gives a sensing noise level per rollout (default perfect)."""
     sim = Sim(binary)
     rows = []
     for seed in seeds:
+        if noise_for:
+            sim.noise, sim.seed = noise_for(seed), seed
         units, orders = random_scenario(seed)
         rows.extend(label_rows(rollout(sim, units, orders), seed))
     return rows
